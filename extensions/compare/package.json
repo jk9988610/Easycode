@@ -1,0 +1,12 @@
+{
+  "id": "compare",
+  "name": "Compare",
+  "description": "Directory compare powered by E:\\tools\\compare (tool extension, not a language server)",
+  "version": "0.1.0",
+  "contributes": {
+    "activity": "compare",
+    "commands": [
+      { "id": "compare.run", "title": "运行目录比对" }
+    ]
+  }
+}

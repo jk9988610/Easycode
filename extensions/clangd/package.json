@@ -1,0 +1,21 @@
+{
+  "id": "clangd",
+  "name": "clangd",
+  "description": "C/C++ language support via clangd (install clangd on PATH, or set extensionSettings.clangd.command)",
+  "version": "0.1.0",
+  "contributes": {
+    "languageServers": [
+      {
+        "id": "clangd",
+        "command": "clangd",
+        "args": ["--background-index"],
+        "languages": ["c", "cpp"],
+        "workspaceFiles": ["compile_commands.json"],
+        "missingWorkspaceFileMethod": "easycode/missingCompileCommands"
+      }
+    ],
+    "commands": [
+      { "id": "clangd.restart", "title": "重启 clangd 语言服务器" }
+    ]
+  }
+}
