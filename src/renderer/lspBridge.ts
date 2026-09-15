@@ -41,7 +41,7 @@ export class LspBridge {
     this.running = running;
     if (!running) {
       monaco.editor.getModels().forEach((m) => {
-        monaco.editor.setModelMarkers(m, "clangd", []);
+        monaco.editor.setModelMarkers(m, "lsp", []);
       });
     }
   }
@@ -65,9 +65,9 @@ export class LspBridge {
         endColumn: d.range.end.character + 1,
         message: d.message,
         severity: severityToMarker(d.severity),
-        source: d.source || "clangd",
+        source: d.source || "lsp",
       }));
-      monaco.editor.setModelMarkers(target, "clangd", markers);
+      monaco.editor.setModelMarkers(target, "lsp", markers);
     }
   }
 

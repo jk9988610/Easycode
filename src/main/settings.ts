@@ -3,6 +3,9 @@ import path from "node:path";
 import os from "node:os";
 import { app } from "electron";
 
+export type PanelView = "problems" | "output" | "debug" | "terminal" | "chat";
+export type RightView = "outline" | "info" | "chat";
+
 export interface AppSettings {
   lastWorkspace: string;
   windowWidth: number;
@@ -19,12 +22,10 @@ export interface AppSettings {
   showPanel: boolean;
   showRightSidebar: boolean;
   panelHeight: number;
+  panelView: PanelView;
+  rightView: RightView;
   defaultTerminal: "powershell" | "cmd" | "gitbash";
-  pythonPath: string;
-  compareRoot: string;
-  compareDirA: string;
-  compareDirB: string;
-  ignoreWhitespace: boolean;
+  /** Reserved for future extension-contributed language servers. */
   pluginsEnabled: Record<string, boolean>;
   extensionSettings: Record<string, Record<string, unknown>>;
 }
@@ -36,19 +37,16 @@ const DEFAULTS: AppSettings = {
   fontSize: 14,
   fontFamily: "Cascadia Mono, Consolas, monospace",
   wordWrap: false,
-  autoSave: false,
+  autoSave: true,
   autoDetectLanguage: true,
   autoDetectEncoding: true,
   showSidebar: true,
   showPanel: false,
   showRightSidebar: false,
   panelHeight: 220,
+  panelView: "terminal",
+  rightView: "info",
   defaultTerminal: "powershell",
-  pythonPath: "python",
-  compareRoot: "E:\\tools\\compare",
-  compareDirA: "",
-  compareDirB: "",
-  ignoreWhitespace: false,
   pluginsEnabled: {},
   extensionSettings: {},
 };
@@ -70,20 +68,12 @@ export function loadSettings(): AppSettings {
   try {
     const p = settingsPath();
     if (!fs.existsSync(p)) return data;
-    const raw = JSON.parse(fs.readFileSync(p, "utf-8")) as Partial<AppSettings> & {
-      clangdPath?: string;
-      clangdArgs?: string[];
-    };
+    const raw = JSON.parse(fs.readFileSync(p, "utf-8")) as Partial<AppSettings>;
     Object.assign(data, raw);
     data.pluginsEnabled = { ...(raw.pluginsEnabled || {}) };
     data.extensionSettings = { ...(raw.extensionSettings || {}) };
-    if (raw.clangdPath || raw.clangdArgs) {
-      data.extensionSettings.clangd = {
-        ...(data.extensionSettings.clangd || {}),
-        ...(raw.clangdPath ? { command: raw.clangdPath } : {}),
-        ...(raw.clangdArgs ? { args: raw.clangdArgs } : {}),
-      };
-    }
+    if (!data.panelView) data.panelView = DEFAULTS.panelView;
+    if (!data.rightView) data.rightView = DEFAULTS.rightView;
   } catch {
     /* keep defaults */
   }

@@ -4,25 +4,29 @@ import {
   monaco,
   languageFromPath,
   pathToUri,
+  registerEasycodeTheme,
 } from "./monacoSetup";
 import { LspBridge } from "./lspBridge";
 import { TerminalPanel } from "./terminalPanel";
+import { countProblems, renderProblemsList, type ProblemItem } from "./problemsPanel";
+import {
+  accountPlaceholderHtml,
+  chatPlaceholderHtml,
+  debugPlaceholderHtml,
+  extensionsPlaceholderHtml,
+  loginPopoverHtml,
+  outputPlaceholderHtml,
+  scmPlaceholderHtml,
+  searchPlaceholderHtml,
+  tasksPlaceholderHtml,
+} from "./placeholderViews";
 import type {
   ActivityId,
   AppSettings,
-  CompareResult,
   EditorTab,
-  FileChange,
-  PluginInfo,
+  PanelView,
   ShellKind,
 } from "./types";
-
-const KIND_LABEL: Record<string, string> = {
-  deleted: "删除",
-  added: "新增",
-  modified: "修改",
-  binary: "二进制",
-};
 
 class App {
   private root: HTMLElement;
@@ -33,10 +37,6 @@ class App {
   private activeTabId: string | null = null;
   private expanded = new Set<string>();
   private treeCache = new Map<string, Awaited<ReturnType<typeof window.easycode.listDir>>>();
-  private compareResult: CompareResult | null = null;
-  private compareBusy = false;
-  private activeChangeRel: string | null = null;
-  private plugins: PluginInfo[] = [];
   private lspRunning = false;
   private lspServers: string[] = [];
   private cursorLabel = "Ln 1, Col 1";
@@ -44,14 +44,21 @@ class App {
   private commandOpen = false;
   private commandFilter = "";
   private commandIndex = 0;
-
   private editor: monaco.editor.IStandaloneCodeEditor | null = null;
-  private diffEditor: monaco.editor.IStandaloneDiffEditor | null = null;
   private editorEl: HTMLElement | null = null;
   private lsp: LspBridge;
   private changeTimer: number | null = null;
   private terminalPanel: TerminalPanel | null = null;
   private autoSaveTimer: number | null = null;
+  private windowMaximized = false;
+  private titleMenuOpen: string | null = null;
+  private ignoringModelChange = false;
+  private accountPopOpen = false;
+  private manageMenuOpen = false;
+  private settingsOpen = false;
+  private settingsCategory = "common";
+  private settingsFilter = "";
+  private panelResizeCleanup: (() => void) | null = null;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -63,16 +70,18 @@ class App {
 
   async start(): Promise<void> {
     this.settings = await window.easycode.getSettings();
+    if (!this.settings.panelView) this.settings.panelView = "terminal";
+    if (!this.settings.rightView) this.settings.rightView = "info";
     this.workspace = this.settings.lastWorkspace || "";
-    this.plugins = await window.easycode.listPlugins();
     const st = await window.easycode.lspStatus();
     this.applyLspStatus(st);
     this.lsp.registerProviders();
+    registerEasycodeTheme();
+    monaco.editor.setTheme("easycode-dark");
 
     window.easycode.onMenu("menu:openFolder", () => void this.openFolder());
     window.easycode.onMenu("menu:save", () => void this.saveActive());
     window.easycode.onMenu("menu:commandPalette", () => this.toggleCommandPalette(true));
-    window.easycode.onMenu("menu:installExtension", () => void this.installExtension());
     window.easycode.onMenu("menu:togglePanel", () => void this.togglePanel());
     window.easycode.onMenu("menu:toggleSidebar", () => void this.toggleSidebar());
     window.easycode.onMenu("menu:toggleRightSidebar", () => void this.toggleRightSidebar());
@@ -80,36 +89,37 @@ class App {
       const kind = (args[0] as ShellKind | undefined) || this.settings.defaultTerminal;
       void this.openTerminal(kind);
     });
+    window.easycode.onMenu("menu:about", () =>
+      this.showToast("Easycode — 干净的编辑器壳"),
+    );
     window.easycode.onLspNotification((data) => {
-      if (data.method === "easycode/missingCompileCommands") {
-        this.showToast(
-          "未找到 compile_commands.json。clangd 提示可能不完整（Keil 工程请自行生成）。",
-          false,
-        );
-        return;
-      }
-      if (data.method === "easycode/missingWorkspaceFile") {
-        const p = data.params as { file?: string; serverId?: string };
-        const file = p.file || "工作区文件";
-        const server = p.serverId ? `（${p.serverId}）` : "";
-        this.showToast(`未找到 ${file}${server}，语言服务提示可能不完整。`, false);
-        return;
-      }
-      if (data.method === "easycode/serverStartFailed") {
-        const p = data.params as { serverId?: string; command?: string; message?: string };
-        const name = p.serverId || p.command || "语言服务器";
-        this.showToast(`${name} 启动失败：${p.message || "未知错误"}`, true);
-        return;
-      }
       this.lsp.handleNotification(data.method, data.params);
+      this.refreshProblemsUi();
     });
     window.easycode.onLspStatus((data) => {
       this.applyLspStatus(data);
       this.renderStatus();
     });
+    this.windowMaximized = await window.easycode.windowIsMaximized();
+    window.easycode.onWindowMaximized((maximized) => {
+      this.windowMaximized = maximized;
+      this.updateMaximizeButton();
+    });
+    window.easycode.onFileChanged((data) => void this.handleExternalFileChange(data.path));
+    window.easycode.onFileDeleted((data) => void this.handleExternalFileDeleted(data.path));
+    window.easycode.onTreeChanged((data) => void this.handleTreeChanged(data.path));
 
     window.addEventListener("keydown", (e) => this.onGlobalKey(e));
     window.addEventListener("resize", () => this.terminalPanel?.layout());
+    window.addEventListener("blur", () => {
+      if (this.settings.autoSave) void this.saveActive();
+    });
+    window.addEventListener("focus", () => void this.refreshOpenTabsFromDisk());
+    window.addEventListener("click", () => {
+      this.closeTitleMenus();
+      this.closeAccountPop();
+      this.closeManageMenu();
+    });
     window.addEventListener("beforeunload", (e) => {
       if (this.tabs.some((t) => t.dirty)) {
         e.preventDefault();
@@ -122,18 +132,12 @@ class App {
         let filePath = resource.fsPath;
         if (!filePath && resource.scheme === "file") {
           filePath = decodeURIComponent(resource.path.replace(/^\//, ""));
-          if (/^[a-zA-Z]%3A/i.test(filePath) || /^[a-zA-Z]:/.test(filePath) === false) {
-            const m = /^\/?([a-zA-Z]):\//.exec(resource.path);
-            if (m) {
-              filePath = m[1] + ":" + resource.path.slice(m[0].length - 1).replace(/\//g, "\\");
-            }
-          }
         }
         if (!filePath) return false;
         await this.openFile(filePath);
         const ed = this.editor;
-        if (ed && selection) {
-          ed.setSelection(selection);
+        if (ed && selection && "startLineNumber" in selection) {
+          ed.setSelection(selection as monaco.Selection);
           ed.revealPositionInCenter({
             lineNumber: selection.startLineNumber,
             column: selection.startColumn,
@@ -147,13 +151,11 @@ class App {
     if (this.workspace) {
       this.expanded.add(this.workspace);
       void this.ensureTree(this.workspace);
+      void window.easycode.watchWorkspace(this.workspace);
     }
   }
 
-  private applyLspStatus(st: {
-    running: boolean;
-    servers?: string[];
-  }): void {
+  private applyLspStatus(st: { running: boolean; servers?: string[] }): void {
     this.lspRunning = st.running;
     this.lspServers = st.servers || [];
     this.lsp.setRunning(st.running);
@@ -180,30 +182,34 @@ class App {
       e.preventDefault();
       void this.openTerminal(this.settings.defaultTerminal);
     }
-    if (e.key === "Escape" && this.commandOpen) {
-      this.toggleCommandPalette(false);
+    if (e.ctrlKey && e.key === ",") {
+      e.preventDefault();
+      this.openSettingsModal();
+    }
+    if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "x") {
+      e.preventDefault();
+      void this.openActivity("extensions");
+    }
+    if (e.key === "Escape") {
+      if (this.settingsOpen) {
+        this.closeSettingsModal();
+        return;
+      }
+      if (this.commandOpen) this.toggleCommandPalette(false);
+      this.closeTitleMenus();
+      this.closeAccountPop();
+      this.closeManageMenu();
     }
   }
 
-  private showToast(message: string, isError = false): void {
-    const old = document.querySelector(".toast");
-    old?.remove();
-    const el = document.createElement("div");
-    el.className = "toast" + (isError ? " error" : "");
-    el.textContent = message;
-    document.body.appendChild(el);
-    if (this.toastTimer) window.clearTimeout(this.toastTimer);
-    this.toastTimer = window.setTimeout(() => el.remove(), 5000);
-  }
-
   private applyLayoutClasses(): void {
-    const shell = this.root.querySelector(".shell") as HTMLElement | null;
+    const shell = this.root.querySelector(".shell");
     if (!shell) return;
     shell.classList.toggle("no-sidebar", !this.settings.showSidebar);
     shell.classList.toggle("no-panel", !this.settings.showPanel);
     shell.classList.toggle("no-right", !this.settings.showRightSidebar);
     const panelH = `${this.settings.panelHeight}px`;
-    shell.style.setProperty("--panel-h", panelH);
+    (shell as HTMLElement).style.setProperty("--panel-h", panelH);
     const panel = this.root.querySelector(".bottom-panel") as HTMLElement | null;
     if (panel) panel.style.setProperty("--panel-h", panelH);
   }
@@ -222,12 +228,15 @@ class App {
     this.applyLayoutClasses();
     this.renderTitlebar();
     if (next) {
-      this.ensureTerminalPanel();
-      if (this.terminalPanel && !this.terminalPanel.hasTabs()) {
-        await this.terminalPanel.open(this.settings.defaultTerminal);
+      this.renderBottomPanel();
+      if (this.settings.panelView === "terminal") {
+        this.ensureTerminalPanel();
+        if (this.terminalPanel && !this.terminalPanel.hasTabs()) {
+          await this.terminalPanel.open(this.settings.defaultTerminal);
+        }
+        this.renderPanelChrome();
+        this.terminalPanel?.layout();
       }
-      this.renderPanelTabs();
-      this.terminalPanel?.layout();
     }
   }
 
@@ -239,25 +248,39 @@ class App {
     this.renderTitlebar();
   }
 
-  private ensureTerminalPanel(): void {
-    const host = this.root.querySelector("#term-host") as HTMLElement | null;
-    if (!host) return;
-    if (!this.terminalPanel) {
-      this.terminalPanel = new TerminalPanel(host);
+  private async setPanelView(view: PanelView): Promise<void> {
+    this.settings = await window.easycode.setSettings({
+      panelView: view,
+      showPanel: true,
+    });
+    this.applyLayoutClasses();
+    this.renderTitlebar();
+    this.renderBottomPanel();
+  }
+
+  private async openChatPlaceholder(): Promise<void> {
+    if (!this.settings.showRightSidebar) {
+      this.settings = await window.easycode.setSettings({ showRightSidebar: true });
+      this.applyLayoutClasses();
     }
+    this.renderTitlebar();
+    this.renderRightbar();
   }
 
   private async openTerminal(kind: ShellKind): Promise<void> {
-    if (!this.settings.showPanel) {
-      this.settings = await window.easycode.setSettings({ showPanel: true });
-      this.applyLayoutClasses();
-      this.renderTitlebar();
+    if (!this.settings.showPanel || this.settings.panelView !== "terminal") {
+      await this.setPanelView("terminal");
     }
     this.ensureTerminalPanel();
-    if (!this.terminalPanel) return;
-    await this.terminalPanel.open(kind);
-    this.renderPanelTabs();
-    this.terminalPanel.layout();
+    await this.terminalPanel?.open(kind);
+    this.renderPanelChrome();
+    this.terminalPanel?.layout();
+  }
+
+  private ensureTerminalPanel(): void {
+    const host = this.root.querySelector("#term-host") as HTMLElement | null;
+    if (!host) return;
+    if (!this.terminalPanel) this.terminalPanel = new TerminalPanel(host);
   }
 
   private async openFolder(): Promise<void> {
@@ -268,19 +291,9 @@ class App {
     this.treeCache.clear();
     this.expanded = new Set([folder]);
     this.activity = "explorer";
+    await window.easycode.watchWorkspace(folder);
     this.render();
     const st = await window.easycode.lspStatus();
-    this.applyLspStatus(st);
-    this.renderStatus();
-  }
-
-  private async installExtension(): Promise<void> {
-    const list = await window.easycode.installPluginFolder();
-    if (!list) return;
-    this.plugins = list;
-    this.showToast("扩展已安装");
-    if (this.activity === "extensions") this.renderSidebarBody();
-    const st = await window.easycode.lspRestart();
     this.applyLspStatus(st);
     this.renderStatus();
   }
@@ -297,17 +310,17 @@ class App {
     return this.tabs.find((t) => t.id === this.activeTabId);
   }
 
-  private clangdCommand(): string {
-    const clangd = this.settings.extensionSettings?.clangd || {};
-    const cmd = clangd.command;
-    return typeof cmd === "string" && cmd.trim() ? cmd.trim() : "clangd";
-  }
-
   private async openFile(filePath: string): Promise<void> {
-    const existing = this.tabs.find((t) => t.path === filePath && t.view !== "diff");
+    const existing = this.tabs.find((t) => this.samePath(t.path, filePath));
     if (existing) {
       this.activeTabId = existing.id;
-      this.render();
+      if (!existing.dirty) await this.reloadTabFromDisk(existing);
+      this.renderTabs();
+      this.renderBreadcrumbs();
+      this.renderEditorHost();
+      this.renderStatus();
+      this.renderRightbar();
+      if (this.activity === "explorer") this.renderSidebarBody();
       return;
     }
     const { content, encoding } = await window.easycode.readFile(filePath, {
@@ -326,24 +339,198 @@ class App {
       dirty: false,
       language,
       encoding,
-      view: "code",
     };
     this.tabs.push(tab);
     this.activeTabId = tab.id;
-    this.render();
+    await window.easycode.watchFile(filePath);
+    this.renderTabs();
+    this.renderBreadcrumbs();
+    this.renderEditorHost();
+    this.renderStatus();
+    this.renderRightbar();
+    if (this.activity === "explorer") this.renderSidebarBody();
     await this.lsp.didOpen(filePath, language, content);
+  }
+
+  private async handleExternalFileChange(filePath: string): Promise<void> {
+    const tab = this.tabs.find((t) => this.samePath(t.path, filePath));
+    if (!tab) return;
+    if (tab.dirty) {
+      this.showToast(`${tab.name} 已在外部修改，但本地有未保存更改`, false);
+      return;
+    }
+    if (await this.reloadTabFromDisk(tab)) {
+      this.showToast(`已同步外部更改：${tab.name}`);
+    }
+  }
+
+  private async handleExternalFileDeleted(filePath: string): Promise<void> {
+    const victims = this.tabs.filter((t) => this.samePath(t.path, filePath));
+    for (const tab of victims) {
+      if (tab.dirty) {
+        this.showToast(`${tab.name} 已在磁盘上删除，本地仍有未保存内容`, false);
+        continue;
+      }
+      await this.closeTabByPath(tab.path, true);
+    }
+    await this.invalidateTreeAround(filePath);
+  }
+
+  private async handleTreeChanged(changedPath: string): Promise<void> {
+    await this.invalidateTreeAround(changedPath);
+    for (const tab of [...this.tabs]) {
+      if (
+        !this.samePath(tab.path, changedPath) &&
+        !this.isPathUnder(tab.path, changedPath)
+      ) {
+        continue;
+      }
+      const exists = await window.easycode.exists(tab.path);
+      if (!exists) {
+        if (tab.dirty) {
+          this.showToast(`${tab.name} 已在磁盘上删除，本地仍有未保存内容`, false);
+        } else {
+          await this.closeTabByPath(tab.path, true);
+        }
+      } else if (!tab.dirty) {
+        await this.reloadTabFromDisk(tab);
+      }
+    }
+  }
+
+  private async invalidateTreeAround(changedPath: string): Promise<void> {
+    const parent = this.parentDir(changedPath);
+    for (const dir of [...this.treeCache.keys()]) {
+      if (
+        this.samePath(dir, parent) ||
+        this.samePath(dir, changedPath) ||
+        this.isPathUnder(dir, changedPath)
+      ) {
+        this.treeCache.delete(dir);
+      }
+    }
+    for (const dir of [...this.expanded]) {
+      if (this.samePath(dir, changedPath) || this.isPathUnder(dir, changedPath)) {
+        if (!(await window.easycode.exists(dir))) this.expanded.delete(dir);
+      }
+    }
+    if (this.workspace && !this.expanded.has(this.workspace)) {
+      this.expanded.add(this.workspace);
+    }
+    for (const dir of [...this.expanded]) {
+      if (!this.treeCache.has(dir)) {
+        try {
+          this.treeCache.set(dir, await window.easycode.listDir(dir));
+        } catch {
+          this.expanded.delete(dir);
+        }
+      }
+    }
+    if (this.activity === "explorer") this.renderSidebarBody();
+  }
+
+  private async refreshOpenTabsFromDisk(): Promise<void> {
+    for (const tab of [...this.tabs]) {
+      if (tab.dirty) continue;
+      const exists = await window.easycode.exists(tab.path);
+      if (!exists) await this.closeTabByPath(tab.path, true);
+      else await this.reloadTabFromDisk(tab);
+    }
+    if (this.workspace) await this.invalidateTreeAround(this.workspace);
+  }
+
+  private async closeTabByPath(filePath: string, _force: boolean): Promise<void> {
+    const tab = this.tabs.find((t) => this.samePath(t.path, filePath));
+    if (!tab) return;
+    await this.lsp.didClose(tab.path);
+    await window.easycode.unwatchFile(tab.path);
+    const idx = this.tabs.findIndex((t) => t.id === tab.id);
+    this.tabs.splice(idx, 1);
+    if (this.activeTabId === tab.id) {
+      this.activeTabId = this.tabs[Math.max(0, idx - 1)]?.id ?? null;
+    }
+    this.showToast(`文件已删除：${tab.name}`, false);
+    this.renderTabs();
+    this.renderBreadcrumbs();
+    this.renderEditorHost();
+    this.renderStatus();
+    this.renderRightbar();
+    if (this.activity === "explorer") this.renderSidebarBody();
+  }
+
+  private async reloadTabFromDisk(tab: EditorTab): Promise<boolean> {
+    try {
+      if (!(await window.easycode.exists(tab.path))) {
+        await this.closeTabByPath(tab.path, true);
+        return true;
+      }
+      const { content, encoding } = await window.easycode.readFile(tab.path, {
+        autoDetectEncoding: this.settings.autoDetectEncoding,
+        encoding: tab.encoding,
+      });
+      if (content === tab.content && encoding === tab.encoding) return false;
+      tab.content = content;
+      tab.original = content;
+      tab.encoding = encoding;
+      tab.dirty = false;
+      const model = monaco.editor.getModel(monaco.Uri.file(tab.path));
+      if (model && model.getValue() !== content) {
+        this.ignoringModelChange = true;
+        try {
+          model.setValue(content);
+        } finally {
+          this.ignoringModelChange = false;
+        }
+      }
+      await this.lsp.didChange(tab.path, content);
+      this.renderTabs();
+      this.renderStatus();
+      if (tab.id === this.activeTabId) this.renderRightbar();
+      this.refreshProblemsUi();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private samePath(a: string, b: string): boolean {
+    return a.replace(/\\/g, "/").toLowerCase() === b.replace(/\\/g, "/").toLowerCase();
+  }
+
+  private parentDir(filePath: string): string {
+    const normalized = filePath.replace(/\\/g, "/");
+    const idx = normalized.lastIndexOf("/");
+    if (idx <= 0) return filePath;
+    const parent = normalized.slice(0, idx);
+    return filePath.includes("\\") ? parent.replace(/\//g, "\\") : parent;
+  }
+
+  private isPathUnder(child: string, parent: string): boolean {
+    const c = child.replace(/\\/g, "/").toLowerCase().replace(/\/+$/, "");
+    const p = parent.replace(/\\/g, "/").toLowerCase().replace(/\/+$/, "");
+    return c === p || c.startsWith(p + "/");
+  }
+
+  private relativePath(filePath: string): string {
+    if (!this.workspace) return filePath;
+    const w = this.workspace.replace(/\\/g, "/").replace(/\/+$/, "");
+    const f = filePath.replace(/\\/g, "/");
+    if (f.toLowerCase().startsWith(w.toLowerCase() + "/")) {
+      return f.slice(w.length + 1);
+    }
+    return filePath;
   }
 
   private async saveActive(): Promise<void> {
     const tab = this.activeTab();
-    if (!tab || tab.view === "diff" || !tab.dirty) return;
+    if (!tab || !tab.dirty) return;
     await window.easycode.writeFile(tab.path, tab.content, tab.encoding || "utf-8");
     tab.original = tab.content;
     tab.dirty = false;
     await this.lsp.didSave(tab.path, tab.content);
     this.renderTabs();
     this.renderStatus();
-    this.renderTitlebar();
+    if (this.activity === "explorer") this.renderSidebarBody();
   }
 
   private async closeTab(id: string): Promise<void> {
@@ -353,177 +540,62 @@ class App {
       const ok = window.confirm(`${tab.name} 有未保存更改，仍要关闭吗？`);
       if (!ok) return;
     }
-    if (tab.view !== "diff") {
-      await this.lsp.didClose(tab.path);
-    }
+    await this.lsp.didClose(tab.path);
+    await window.easycode.unwatchFile(tab.path);
     const idx = this.tabs.findIndex((t) => t.id === id);
     this.tabs.splice(idx, 1);
     if (this.activeTabId === id) {
       this.activeTabId = this.tabs[Math.max(0, idx - 1)]?.id ?? null;
     }
-    this.render();
+    this.renderTabs();
+    this.renderBreadcrumbs();
+    this.renderEditorHost();
+    this.renderStatus();
+    this.renderRightbar();
+    if (this.activity === "explorer") this.renderSidebarBody();
+    this.refreshProblemsUi();
   }
 
-  private async runCompare(): Promise<void> {
-    const a = this.settings.compareDirA?.trim();
-    const b = this.settings.compareDirB?.trim();
-    if (!a || !b) {
-      this.showToast("请先选择目录 A 和目录 B", true);
-      return;
+  private showToast(msg: string, _danger = false): void {
+    let el = this.root.querySelector(".toast") as HTMLElement | null;
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "toast";
+      this.root.appendChild(el);
     }
-    this.compareBusy = true;
-    this.renderSidebarBody();
-    try {
-      const result = await window.easycode.compareRun(a, b, {
-        ignoreWhitespace: this.settings.ignoreWhitespace,
-      });
-      this.compareResult = result;
-      if (result.error) this.showToast(result.error, true);
-      await window.easycode.setSettings({
-        compareDirA: a,
-        compareDirB: b,
-        ignoreWhitespace: this.settings.ignoreWhitespace,
-      });
-    } catch (err) {
-      this.showToast(String(err), true);
-    } finally {
-      this.compareBusy = false;
-      this.renderSidebarBody();
-    }
+    el.textContent = msg;
+    el.classList.add("show");
+    if (this.toastTimer) window.clearTimeout(this.toastTimer);
+    this.toastTimer = window.setTimeout(() => el?.classList.remove("show"), 2600);
   }
 
-  private openChange(change: FileChange): void {
-    this.activeChangeRel = change.rel;
-    const left = (change.lines_a || []).join("\n");
-    const right = (change.lines_b || []).join("\n");
-    const id = `diff:${change.rel}`;
-    let tab = this.tabs.find((t) => t.id === id);
-    if (!tab) {
-      tab = {
-        id,
-        path: change.path_b || change.path_a || change.rel,
-        name: change.rel,
-        content: right,
-        original: left,
-        dirty: false,
-        language: languageFromPath(change.rel),
-        encoding: "utf-8",
-        view: "diff",
-        diff: {
-          original: left,
-          modified: right,
-          originalPath: change.path_a || undefined,
-          modifiedPath: change.path_b || undefined,
-        },
-      };
-      this.tabs.push(tab);
-    } else {
-      tab.diff = {
-        original: left,
-        modified: right,
-        originalPath: change.path_a || undefined,
-        modifiedPath: change.path_b || undefined,
-      };
-    }
-    this.activeTabId = tab.id;
-    this.render();
-  }
-
-  private commands() {
+  private buildCommands(): { id: string; label: string; keys?: string; run: () => void }[] {
+    const withKeys = (
+      id: string,
+      label: string,
+      keys: string | undefined,
+      run: () => void,
+    ) => ({ id, label, keys, run });
     return [
-      { id: "openFolder", title: "打开文件夹", run: () => void this.openFolder() },
-      { id: "save", title: "保存当前文件", run: () => void this.saveActive() },
-      {
-        id: "installExtension",
-        title: "从文件夹安装扩展…",
-        run: () => void this.installExtension(),
-      },
-      {
-        id: "toggleSidebar",
-        title: "切换侧栏可见性",
-        run: () => void this.toggleSidebar(),
-      },
-      {
-        id: "togglePanel",
-        title: "切换底栏可见性",
-        run: () => void this.togglePanel(),
-      },
-      {
-        id: "toggleRight",
-        title: "切换右侧栏可见性",
-        run: () => void this.toggleRightSidebar(),
-      },
-      {
-        id: "term.powershell",
-        title: "新建终端：PowerShell",
-        run: () => void this.openTerminal("powershell"),
-      },
-      {
-        id: "term.cmd",
-        title: "新建终端：CMD",
-        run: () => void this.openTerminal("cmd"),
-      },
-      {
-        id: "term.gitbash",
-        title: "新建终端：Git Bash",
-        run: () => void this.openTerminal("gitbash"),
-      },
-      {
-        id: "explorer",
-        title: "转到：资源管理器",
-        run: () => {
-          this.activity = "explorer";
-          this.render();
-        },
-      },
-      {
-        id: "compare",
-        title: "转到：比对",
-        run: () => {
-          this.activity = "compare";
-          this.render();
-        },
-      },
-      {
-        id: "settings",
-        title: "转到：设置",
-        run: () => {
-          this.activity = "settings";
-          this.render();
-        },
-      },
-      {
-        id: "extensions",
-        title: "转到：扩展",
-        run: () => {
-          this.activity = "extensions";
-          this.render();
-        },
-      },
-      {
-        id: "lsp.restart",
-        title: "重启语言服务器",
-        run: async () => {
-          const r = await window.easycode.lspRestart();
-          this.applyLspStatus(r);
-          this.showToast(
-            r.running
-              ? `语言服务器已重启${r.servers?.length ? "：" + r.servers.join(", ") : ""}`
-              : "没有正在运行的语言服务器",
-            !r.running,
-          );
-          this.renderStatus();
-        },
-      },
-      {
-        id: "compare.run",
-        title: "运行目录比对",
-        run: () => {
-          this.activity = "compare";
-          this.render();
-          void this.runCompare();
-        },
-      },
+      withKeys("openFolder", "打开文件夹", "Ctrl+O", () => void this.openFolder()),
+      withKeys("save", "保存当前文件", "Ctrl+S", () => void this.saveActive()),
+      withKeys("toggleSidebar", "切换左侧栏", "Ctrl+B", () => void this.toggleSidebar()),
+      withKeys("togglePanel", "切换底栏", "Ctrl+J", () => void this.togglePanel()),
+      withKeys("toggleRight", "切换右侧栏", "Ctrl+Alt+B", () => void this.toggleRightSidebar()),
+      withKeys("problems", "显示问题", undefined, () => void this.setPanelView("problems")),
+      withKeys("terminal", "显示终端", "Ctrl+`", () =>
+        void this.openTerminal(this.settings.defaultTerminal),
+      ),
+      withKeys("chat", "AI 聊天（占位）", undefined, () => void this.openChatPlaceholder()),
+      withKeys("explorer", "转到：资源管理器", undefined, () => {
+        this.activity = "explorer";
+        this.render();
+      }),
+      withKeys("search", "转到：搜索", undefined, () => {
+        this.activity = "search";
+        this.render();
+      }),
+      withKeys("settings", "打开设置", "Ctrl+,", () => this.openSettingsModal()),
     ];
   }
 
@@ -535,6 +607,8 @@ class App {
   }
 
   private render(): void {
+    this.panelResizeCleanup?.();
+    this.panelResizeCleanup = null;
     if (this.terminalPanel) {
       this.terminalPanel.dispose();
       this.terminalPanel = null;
@@ -556,18 +630,27 @@ class App {
               <div class="sidebar-header"></div>
               <div class="sidebar-body"></div>
             </div>
-            <div class="main">
-              <div class="tabs"></div>
-              <div class="editor-host"></div>
+            <div class="center-column">
+              <div class="main">
+                <div class="tabs"></div>
+                <div class="breadcrumbs"></div>
+                <div class="editor-host"></div>
+              </div>
+              <div class="bottom-panel" style="--panel-h: ${panelH}px">
+                <div class="panel-sash" title="拖拽调整高度"></div>
+                <div class="panel-chrome"></div>
+                <div class="panel-body">
+                  <div class="panel-view" id="panel-problems" hidden></div>
+                  <div class="panel-view" id="panel-output" hidden></div>
+                  <div class="panel-view" id="panel-debug" hidden></div>
+                  <div class="panel-view" id="term-host" hidden></div>
+                </div>
+              </div>
             </div>
             <div class="rightbar">
-              <div class="rightbar-header">大纲</div>
+              <div class="rightbar-header">聊天</div>
               <div class="rightbar-body"></div>
             </div>
-          </div>
-          <div class="bottom-panel" style="--panel-h: ${panelH}px">
-            <div class="panel-tabs"></div>
-            <div class="term-host" id="term-host"></div>
           </div>
         </div>
         <div class="status"></div>
@@ -579,194 +662,430 @@ class App {
     this.renderSidebarHeader();
     this.renderSidebarBody();
     this.renderTabs();
+    this.renderBreadcrumbs();
     this.renderEditorHost();
     this.renderRightbar();
-    if (this.settings.showPanel) {
-      this.ensureTerminalPanel();
-    }
-    this.renderPanelTabs();
+    this.renderBottomPanel();
+    this.bindPanelResize();
     this.renderStatus();
     this.renderCommandPalette();
+    if (this.settingsOpen) this.renderSettingsModal();
   }
 
   private renderTitlebar(): void {
     const el = this.root.querySelector(".titlebar");
     if (!el) return;
+    const iconSidebar = `<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M9 4v16"/></svg>`;
+    const iconPanel = `<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 15h18"/></svg>`;
+    const iconRight = `<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M15 4v16"/></svg>`;
+    const iconChat = `<svg viewBox="0 0 24 24"><path d="M4 5h16v10H8l-4 4V5z"/></svg>`;
+    const iconAccount = `<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 19c1.8-3 4.2-4.5 7-4.5S17.2 16 19 19"/></svg>`;
+    const iconMin = `<svg viewBox="0 0 10 10"><path d="M1 5h8"/></svg>`;
+    const iconMax = this.windowMaximized
+      ? `<svg viewBox="0 0 10 10"><path d="M2.5 3.5h5v5h-5z"/><path d="M3.5 2.5h5v5"/></svg>`
+      : `<svg viewBox="0 0 10 10"><rect x="1.5" y="1.5" width="7" height="7"/></svg>`;
+    const iconClose = `<svg viewBox="0 0 10 10"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7"/></svg>`;
+
+    const workspaceTitle = this.workspace
+      ? this.workspace.split(/[/\\]/).filter(Boolean).pop() || "Easycode"
+      : "Easycode";
+
     el.innerHTML = `
       <div class="brand">Easycode</div>
-      <button type="button" data-act="open">打开文件夹</button>
-      <button type="button" data-act="save" ${this.activeTab()?.dirty ? "" : "disabled"}>保存</button>
-      <div class="spacer"></div>
-      <div class="layout-btns">
-        <button type="button" data-act="toggle-sidebar" class="${
-          this.settings.showSidebar ? "active" : ""
-        }">侧栏</button>
-        <button type="button" data-act="toggle-panel" class="${
-          this.settings.showPanel ? "active" : ""
-        }">底栏</button>
-        <button type="button" data-act="toggle-right" class="${
-          this.settings.showRightSidebar ? "active" : ""
-        }">右侧</button>
-      </div>
-      <div class="term-menu">
-        <button type="button" data-act="term-toggle">终端 ▾</button>
-        <div class="drop">
-          <button type="button" data-shell="powershell">PowerShell</button>
-          <button type="button" data-shell="cmd">CMD</button>
-          <button type="button" data-shell="gitbash">Git Bash</button>
+      <nav class="menubar">
+        <div class="menu-root" data-menu="file">
+          <button type="button" class="menu-trigger" data-menu-trigger="file">文件</button>
+          <div class="menu-drop">
+            <button type="button" data-cmd="openFolder"><span>打开文件夹</span><kbd>Ctrl+O</kbd></button>
+            <button type="button" data-cmd="save"><span>保存</span><kbd>Ctrl+S</kbd></button>
+            <div class="menu-sep"></div>
+            <button type="button" data-cmd="soon"><span>自动保存</span></button>
+            <div class="menu-sep"></div>
+            <button type="button" data-cmd="quit"><span>退出</span></button>
+          </div>
         </div>
-      </div>
-      <button type="button" data-act="palette">命令面板</button>
-    `;
-    el.querySelector('[data-act="open"]')!.addEventListener("click", () => void this.openFolder());
-    el.querySelector('[data-act="save"]')!.addEventListener("click", () => void this.saveActive());
-    el.querySelector('[data-act="toggle-sidebar"]')!.addEventListener("click", () =>
-      void this.toggleSidebar(),
-    );
-    el.querySelector('[data-act="toggle-panel"]')!.addEventListener("click", () =>
-      void this.togglePanel(),
-    );
-    el.querySelector('[data-act="toggle-right"]')!.addEventListener("click", () =>
-      void this.toggleRightSidebar(),
-    );
-    const termMenu = el.querySelector(".term-menu") as HTMLElement;
-    el.querySelector('[data-act="term-toggle"]')!.addEventListener("click", (e) => {
-      e.stopPropagation();
-      termMenu.classList.toggle("open");
-    });
-    termMenu.querySelectorAll<HTMLButtonElement>("[data-shell]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        termMenu.classList.remove("open");
-        void this.openTerminal(btn.getAttribute("data-shell") as ShellKind);
-      });
-    });
-    document.addEventListener(
-      "click",
-      () => termMenu.classList.remove("open"),
-      { once: true },
-    );
-    el.querySelector('[data-act="palette"]')!.addEventListener("click", () =>
-      this.toggleCommandPalette(true),
-    );
-  }
-
-  private renderPanelTabs(): void {
-    const el = this.root.querySelector(".panel-tabs") as HTMLElement | null;
-    if (!el) return;
-    const tabs = this.terminalPanel?.getTabs() || [];
-    const active = tabs.find((t) => t.active);
-    el.innerHTML = `
-      <span class="label">TERMINAL</span>
-      ${tabs
-        .map(
-          (t) =>
-            `<button type="button" class="term-tab ${t.active ? "active" : ""}" data-term="${escapeAttr(
-              t.id,
-            )}">${escapeHtml(t.title)}</button>`,
-        )
-        .join("")}
-      <div class="spacer"></div>
-      ${
-        active
-          ? `<button type="button" data-act="kill-term" title="关闭终端">×</button>`
-          : ""
-      }
-      <div class="term-menu panel-new">
-        <button type="button" data-act="new-term">+</button>
-        <div class="drop">
-          <button type="button" data-shell="powershell">PowerShell</button>
-          <button type="button" data-shell="cmd">CMD</button>
-          <button type="button" data-shell="gitbash">Git Bash</button>
+        <div class="menu-root" data-menu="edit">
+          <button type="button" class="menu-trigger" data-menu-trigger="edit">编辑</button>
+          <div class="menu-drop">
+            <button type="button" data-cmd="soon"><span>撤销</span><kbd>Ctrl+Z</kbd></button>
+            <button type="button" data-cmd="soon"><span>恢复</span><kbd>Ctrl+Y</kbd></button>
+            <div class="menu-sep"></div>
+            <button type="button" data-cmd="soon"><span>剪切</span><kbd>Ctrl+X</kbd></button>
+            <button type="button" data-cmd="soon"><span>复制</span><kbd>Ctrl+C</kbd></button>
+            <button type="button" data-cmd="soon"><span>粘贴</span><kbd>Ctrl+V</kbd></button>
+            <div class="menu-sep"></div>
+            <button type="button" data-cmd="soon"><span>查找</span><kbd>Ctrl+F</kbd></button>
+            <button type="button" data-cmd="soon"><span>替换</span><kbd>Ctrl+H</kbd></button>
+          </div>
         </div>
-      </div>
-    `;
-    el.querySelectorAll<HTMLElement>("[data-term]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        this.terminalPanel?.activate(btn.getAttribute("data-term")!);
-        this.renderPanelTabs();
-      });
-    });
-    el.querySelector('[data-act="kill-term"]')?.addEventListener("click", async () => {
-      if (!active) return;
-      await this.terminalPanel?.close(active.id);
-      this.renderPanelTabs();
-    });
-    const newMenu = el.querySelector(".panel-new") as HTMLElement | null;
-    el.querySelector('[data-act="new-term"]')?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      newMenu?.classList.toggle("open");
-    });
-    newMenu?.querySelectorAll<HTMLButtonElement>("[data-shell]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        newMenu.classList.remove("open");
-        void this.openTerminal(btn.getAttribute("data-shell") as ShellKind);
-      });
-    });
-  }
-
-  private renderRightbar(): void {
-    const el = this.root.querySelector(".rightbar-body") as HTMLElement | null;
-    if (!el) return;
-    const tab = this.activeTab();
-    if (!tab) {
-      el.innerHTML = `<div class="empty-hint">无活动文件</div>`;
-      return;
-    }
-    el.innerHTML = `
-      <div style="padding:8px 10px;font-size:12px;line-height:1.6">
-        <div style="font-weight:600;color:var(--ink)">${escapeHtml(tab.name)}</div>
-        <div style="color:var(--muted);margin-top:8px">语言：${escapeHtml(tab.language)}</div>
-        <div style="color:var(--muted)">编码：${escapeHtml(
-          (tab.encoding || "utf-8").toUpperCase(),
+        <div class="menu-root" data-menu="selection">
+          <button type="button" class="menu-trigger" data-menu-trigger="selection">选择</button>
+          <div class="menu-drop">
+            <button type="button" data-cmd="soon"><span>全选</span><kbd>Ctrl+A</kbd></button>
+            <button type="button" data-cmd="soon"><span>扩大选区</span></button>
+            <button type="button" data-cmd="soon"><span>多光标（即将推出）</span></button>
+          </div>
+        </div>
+        <div class="menu-root" data-menu="view">
+          <button type="button" class="menu-trigger" data-menu-trigger="view">查看</button>
+          <div class="menu-drop">
+            <button type="button" data-cmd="palette"><span>命令面板</span><kbd>Ctrl+Shift+P</kbd></button>
+            <div class="menu-sep"></div>
+            <button type="button" data-cmd="toggleSidebar"><span>主侧栏</span><kbd>Ctrl+B</kbd></button>
+            <button type="button" data-cmd="togglePanel"><span>面板</span><kbd>Ctrl+J</kbd></button>
+            <button type="button" data-cmd="toggleRight"><span>聊天侧栏</span></button>
+            <div class="menu-sep"></div>
+            <button type="button" data-cmd="panel-problems"><span>问题</span></button>
+            <button type="button" data-cmd="panel-output"><span>输出</span></button>
+            <button type="button" data-cmd="panel-debug"><span>调试控制台</span></button>
+            <button type="button" data-cmd="panel-terminal"><span>终端</span></button>
+            <div class="menu-sep"></div>
+            <button type="button" data-cmd="devtools"><span>开发者工具</span></button>
+            <button type="button" data-cmd="reload"><span>重新加载</span></button>
+          </div>
+        </div>
+        <div class="menu-root" data-menu="go">
+          <button type="button" class="menu-trigger" data-menu-trigger="go">转到</button>
+          <div class="menu-drop">
+            <button type="button" data-cmd="soon"><span>转到文件…</span><kbd>Ctrl+P</kbd></button>
+            <button type="button" data-cmd="soon"><span>转到行/列…</span><kbd>Ctrl+G</kbd></button>
+            <button type="button" data-cmd="soon"><span>转到符号…</span></button>
+          </div>
+        </div>
+        <div class="menu-root" data-menu="run">
+          <button type="button" class="menu-trigger" data-menu-trigger="run">运行</button>
+          <div class="menu-drop">
+            <button type="button" data-cmd="soon"><span>启动调试（即将推出）</span></button>
+            <button type="button" data-cmd="soon"><span>运行任务（即将推出）</span></button>
+          </div>
+        </div>
+        <div class="menu-root" data-menu="terminal">
+          <button type="button" class="menu-trigger" data-menu-trigger="terminal">终端</button>
+          <div class="menu-drop">
+            <button type="button" data-cmd="togglePanel"><span>切换终端面板</span><kbd>Ctrl+J</kbd></button>
+            <div class="menu-sep"></div>
+            <button type="button" data-cmd="term-powershell"><span>新建 PowerShell</span></button>
+            <button type="button" data-cmd="term-cmd"><span>新建 CMD</span></button>
+            <button type="button" data-cmd="term-gitbash"><span>新建 Git Bash</span></button>
+          </div>
+        </div>
+        <div class="menu-root" data-menu="help">
+          <button type="button" class="menu-trigger" data-menu-trigger="help">帮助</button>
+          <div class="menu-drop">
+            <button type="button" data-cmd="about"><span>关于 Easycode</span></button>
+          </div>
+        </div>
+      </nav>
+      <div class="titlebar-drag">
+        <div class="titlebar-center" title="${escapeAttr(this.workspace || "")}">${escapeHtml(
+          workspaceTitle,
         )}</div>
-        <div class="empty-hint" style="margin-top:12px;padding:0">后续可放大纲/问题</div>
       </div>
+      <div class="layout-btns">
+        <button type="button" data-act="toggle-sidebar" title="主侧栏" class="${
+          this.settings.showSidebar ? "active" : ""
+        }">${iconSidebar}</button>
+        <button type="button" data-act="toggle-panel" title="面板" class="${
+          this.settings.showPanel ? "active" : ""
+        }">${iconPanel}</button>
+        <button type="button" data-act="toggle-right" title="聊天" class="${
+          this.settings.showRightSidebar ? "active" : ""
+        }">${iconRight}</button>
+      </div>
+      <div class="titlebar-actions">
+        <button type="button" data-act="chat" title="打开聊天">${iconChat}</button>
+        <button type="button" data-act="account" title="帐户">${iconAccount}</button>
+      </div>
+      <div class="window-controls">
+        <button type="button" data-win="min" title="最小化">${iconMin}</button>
+        <button type="button" data-win="max" title="${
+          this.windowMaximized ? "还原" : "最大化"
+        }">${iconMax}</button>
+        <button type="button" data-win="close" class="win-close" title="关闭">${iconClose}</button>
+      </div>
+      <div class="account-pop-host" hidden>${loginPopoverHtml()}</div>
     `;
+
+    if (this.titleMenuOpen) {
+      el.querySelector(`.menu-root[data-menu="${this.titleMenuOpen}"]`)?.classList.add("open");
+    }
+    if (this.accountPopOpen) {
+      el.querySelector(".account-pop-host")?.removeAttribute("hidden");
+    }
+
+    el.querySelectorAll<HTMLButtonElement>("[data-menu-trigger]").forEach((btn) => {
+      const id = btn.getAttribute("data-menu-trigger")!;
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.toggleTitleMenu(id);
+      });
+      btn.addEventListener("mouseenter", () => {
+        if (this.titleMenuOpen && this.titleMenuOpen !== id) this.toggleTitleMenu(id, true);
+      });
+    });
+    el.querySelectorAll<HTMLButtonElement>("[data-cmd]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const cmd = btn.getAttribute("data-cmd")!;
+        this.closeTitleMenus();
+        void this.runTitleCommand(cmd);
+      });
+    });
+    el.querySelector('[data-act="chat"]')!.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void this.openChatPlaceholder();
+    });
+    el.querySelector('[data-act="account"]')!.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.accountPopOpen = !this.accountPopOpen;
+      this.closeTitleMenus();
+      this.renderTitlebar();
+    });
+    el.querySelector(".account-pop-host")?.addEventListener("click", (e) => e.stopPropagation());
+    el.querySelector('[data-act="toggle-sidebar"]')!.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void this.toggleSidebar();
+    });
+    el.querySelector('[data-act="toggle-panel"]')!.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void this.togglePanel();
+    });
+    el.querySelector('[data-act="toggle-right"]')!.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void this.toggleRightSidebar();
+    });
+    el.querySelector('[data-win="min"]')!.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void window.easycode.windowMinimize();
+    });
+    el.querySelector('[data-win="max"]')!.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void window.easycode.windowMaximize();
+    });
+    el.querySelector('[data-win="close"]')!.addEventListener("click", (e) => {
+      e.stopPropagation();
+      void window.easycode.windowClose();
+    });
+    el.querySelector(".titlebar-drag")!.addEventListener("dblclick", () => {
+      void window.easycode.windowMaximize();
+    });
+  }
+
+  private toggleTitleMenu(id: string, forceOpen = false): void {
+    const el = this.root.querySelector(".titlebar");
+    if (!el) return;
+    this.accountPopOpen = false;
+    const next = forceOpen || this.titleMenuOpen !== id ? id : null;
+    this.titleMenuOpen = next;
+    el.querySelectorAll(".menu-root").forEach((node) => {
+      node.classList.toggle("open", node.getAttribute("data-menu") === next);
+    });
+    el.querySelector(".account-pop-host")?.setAttribute("hidden", "");
+  }
+
+  private closeTitleMenus(): void {
+    if (!this.titleMenuOpen) return;
+    this.titleMenuOpen = null;
+    this.root.querySelectorAll(".menu-root.open").forEach((n) => n.classList.remove("open"));
+  }
+
+  private closeAccountPop(): void {
+    if (!this.accountPopOpen) return;
+    this.accountPopOpen = false;
+    this.root.querySelector(".account-pop-host")?.setAttribute("hidden", "");
+  }
+
+  private updateMaximizeButton(): void {
+    const btn = this.root.querySelector<HTMLButtonElement>('[data-win="max"]');
+    if (!btn) return;
+    btn.title = this.windowMaximized ? "还原" : "最大化";
+    btn.innerHTML = this.windowMaximized
+      ? `<svg viewBox="0 0 10 10"><path d="M2.5 3.5h5v5h-5z"/><path d="M3.5 2.5h5v5"/></svg>`
+      : `<svg viewBox="0 0 10 10"><rect x="1.5" y="1.5" width="7" height="7"/></svg>`;
+  }
+
+  private async runTitleCommand(cmd: string): Promise<void> {
+    switch (cmd) {
+      case "openFolder":
+        await this.openFolder();
+        break;
+      case "save":
+        await this.saveActive();
+        break;
+      case "quit":
+        await window.easycode.windowClose();
+        break;
+      case "togglePanel":
+        await this.togglePanel();
+        break;
+      case "term-powershell":
+        await this.openTerminal("powershell");
+        break;
+      case "term-cmd":
+        await this.openTerminal("cmd");
+        break;
+      case "term-gitbash":
+        await this.openTerminal("gitbash");
+        break;
+      case "palette":
+        this.toggleCommandPalette(true);
+        break;
+      case "toggleSidebar":
+        await this.toggleSidebar();
+        break;
+      case "toggleRight":
+        await this.toggleRightSidebar();
+        break;
+      case "panel-problems":
+        await this.setPanelView("problems");
+        break;
+      case "panel-terminal":
+        await this.setPanelView("terminal");
+        break;
+      case "panel-output":
+        await this.setPanelView("output");
+        break;
+      case "panel-debug":
+        await this.setPanelView("debug");
+        break;
+      case "devtools":
+        await window.easycode.windowToggleDevTools();
+        break;
+      case "reload":
+        await window.easycode.windowReload();
+        break;
+      case "about":
+        this.showToast("Easycode — 干净的编辑器壳");
+        break;
+      case "soon":
+        this.showToast("即将推出");
+        break;
+      default:
+        break;
+    }
   }
 
   private renderActivity(): void {
-    const el = this.root.querySelector(".activity")!;
-    const items: { id: ActivityId; label: string; title: string }[] = [
-      { id: "explorer", label: "📁", title: "资源管理器" },
-      { id: "compare", label: "⇄", title: "比对" },
-      { id: "extensions", label: "🧩", title: "扩展" },
-      { id: "settings", label: "⚙", title: "设置" },
+    const el = this.root.querySelector(".activity");
+    if (!el) return;
+    const icons: Record<ActivityId, string> = {
+      explorer: `<svg viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v7A1.5 1.5 0 0 1 19.5 18h-15A1.5 1.5 0 0 1 3 16.5v-9z"/></svg>`,
+      search: `<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M16 16l4 4"/></svg>`,
+      scm: `<svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 8.5v7M8.5 6h5.5a4 4 0 0 1 4 4v0"/></svg>`,
+      extensions: `<svg viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/></svg>`,
+      settings: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v2.2M12 19.3v2.2M4.9 4.9l1.6 1.6M17.5 17.5l1.6 1.6M2.5 12h2.2M19.3 12h2.2M4.9 19.1l1.6-1.6M17.5 6.5l1.6-1.6"/></svg>`,
+      account: `<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 19c1.8-3 4.2-4.5 7-4.5S17.2 16 19 19"/></svg>`,
+      tasks: `<svg viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4 6h.01M4 12h.01M4 18h.01"/></svg>`,
+    };
+    const top: { id: ActivityId; title: string }[] = [
+      { id: "explorer", title: "资源管理器" },
+      { id: "search", title: "搜索" },
+      { id: "scm", title: "源代码管理" },
+      { id: "extensions", title: "扩展" },
     ];
-    el.innerHTML = items
-      .map(
-        (i) =>
-          `<button type="button" title="${i.title}" data-id="${i.id}" class="${
-            this.activity === i.id ? "active" : ""
-          }">${i.label}</button>`,
-      )
-      .join("");
-    el.querySelectorAll("button").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        this.activity = btn.getAttribute("data-id") as ActivityId;
-        this.renderActivity();
-        this.renderSidebarHeader();
-        this.renderSidebarBody();
+    el.innerHTML = `
+      <div class="activity-top">
+        ${top
+          .map(
+            (i) =>
+              `<button type="button" title="${i.title}" data-id="${i.id}" class="${
+                this.activity === i.id ? "active" : ""
+              }">${icons[i.id]}</button>`,
+          )
+          .join("")}
+      </div>
+      <div class="activity-bottom">
+        <button type="button" title="帐户" data-id="account" class="${
+          this.activity === "account" ? "active" : ""
+        }">${icons.account}</button>
+        <div class="manage-wrap">
+          <button type="button" title="管理" data-act="manage" class="${
+            this.manageMenuOpen || this.settingsOpen || this.activity === "tasks"
+              ? "active"
+              : ""
+          }">${icons.settings}</button>
+          <div class="manage-menu" ${this.manageMenuOpen ? "" : "hidden"}>
+            <button type="button" data-manage="settings"><span>设置</span><kbd>Ctrl+,</kbd></button>
+            <button type="button" data-manage="extensions"><span>扩展</span><kbd>Ctrl+Shift+X</kbd></button>
+            <button type="button" data-manage="tasks"><span>任务</span></button>
+          </div>
+        </div>
+      </div>`;
+
+    el.querySelectorAll<HTMLButtonElement>("[data-id]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.closeManageMenu();
+        void this.openActivity(btn.getAttribute("data-id") as ActivityId);
+      });
+    });
+    el.querySelector('[data-act="manage"]')?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.manageMenuOpen = !this.manageMenuOpen;
+      this.renderActivity();
+    });
+    el.querySelector(".manage-menu")?.addEventListener("click", (e) => e.stopPropagation());
+    el.querySelectorAll<HTMLButtonElement>("[data-manage]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const action = btn.getAttribute("data-manage");
+        this.closeManageMenu();
+        if (action === "settings") this.openSettingsModal();
+        else if (action === "extensions") void this.openActivity("extensions");
+        else if (action === "tasks") void this.openActivity("tasks");
       });
     });
   }
 
+  private async openActivity(id: ActivityId): Promise<void> {
+    this.activity = id;
+    if (!this.settings.showSidebar) {
+      this.settings = await window.easycode.setSettings({ showSidebar: true });
+      this.applyLayoutClasses();
+      this.renderTitlebar();
+    }
+    this.renderActivity();
+    this.renderSidebarHeader();
+    this.renderSidebarBody();
+  }
+
+  private closeManageMenu(): void {
+    if (!this.manageMenuOpen) return;
+    this.manageMenuOpen = false;
+    this.root.querySelector(".manage-menu")?.setAttribute("hidden", "");
+    this.root.querySelector('[data-act="manage"]')?.classList.remove("active");
+  }
+
   private renderSidebarHeader(): void {
-    const el = this.root.querySelector(".sidebar-header")!;
+    const el = this.root.querySelector(".sidebar-header");
+    if (!el) return;
     const titles: Record<ActivityId, string> = {
       explorer: "资源管理器",
-      compare: "目录比对",
+      search: "搜索",
+      scm: "源代码管理",
       extensions: "扩展",
       settings: "设置",
+      account: "帐户",
+      tasks: "任务",
     };
     el.textContent = titles[this.activity];
   }
 
   private renderSidebarBody(): void {
-    const el = this.root.querySelector(".sidebar-body") as HTMLElement;
+    const el = this.root.querySelector(".sidebar-body") as HTMLElement | null;
+    if (!el) return;
     if (this.activity === "explorer") this.renderExplorer(el);
-    else if (this.activity === "compare") this.renderCompareSidebar(el);
-    else if (this.activity === "extensions") void this.renderExtensions(el);
-    else this.renderSettings(el);
+    else if (this.activity === "search") el.innerHTML = searchPlaceholderHtml();
+    else if (this.activity === "scm") el.innerHTML = scmPlaceholderHtml();
+    else if (this.activity === "extensions") el.innerHTML = extensionsPlaceholderHtml();
+    else if (this.activity === "account") el.innerHTML = accountPlaceholderHtml();
+    else if (this.activity === "tasks") el.innerHTML = tasksPlaceholderHtml();
+    else if (this.activity === "settings") {
+      el.innerHTML = `<div class="placeholder-pane"><p class="placeholder-hint">设置已改为弹窗。可通过齿轮菜单或 Ctrl+, 打开。</p><button type="button" class="primary" id="open-settings-modal">打开设置</button></div>`;
+      el.querySelector("#open-settings-modal")?.addEventListener("click", () =>
+        this.openSettingsModal(),
+      );
+    }
   }
 
   private renderExplorer(el: HTMLElement): void {
@@ -774,277 +1093,322 @@ class App {
       el.innerHTML = `<div class="empty-hint">打开一个文件夹开始工作。<br/>快捷键 Ctrl+O</div>`;
       return;
     }
-    el.innerHTML = "";
-    const rootName = this.workspace.split(/[/\\]/).filter(Boolean).pop() || this.workspace;
-    const wrap = document.createElement("div");
-    wrap.appendChild(this.buildTreeNode(this.workspace, rootName, true));
-    el.appendChild(wrap);
-  }
-
-  private buildTreeNode(fullPath: string, name: string, isDir: boolean): HTMLElement {
-    const row = document.createElement("div");
-    row.className = "tree-item" + (this.activeTab()?.path === fullPath ? " active" : "");
-    const twist = document.createElement("span");
-    twist.className = "twist";
-    if (isDir) {
-      twist.textContent = this.expanded.has(fullPath) ? "▾" : "▸";
-    } else {
-      twist.textContent = "";
-    }
-    const label = document.createElement("span");
-    label.textContent = name;
-    row.append(twist, label);
-    row.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      if (isDir) {
-        if (this.expanded.has(fullPath)) this.expanded.delete(fullPath);
-        else {
-          this.expanded.add(fullPath);
-          await this.ensureTree(fullPath);
-        }
+    const openEditors =
+      this.tabs.length > 0
+        ? `<div class="explorer-section">
+            <div class="section-title">打开的编辑器</div>
+            ${this.tabs
+              .map(
+                (t) =>
+                  `<button type="button" class="open-editor ${
+                    t.id === this.activeTabId ? "active" : ""
+                  }" data-tab="${escapeAttr(t.id)}">${escapeHtml(t.name)}${
+                    t.dirty ? " ●" : ""
+                  }</button>`,
+              )
+              .join("")}
+          </div>`
+        : "";
+    el.innerHTML = `${openEditors}<div class="explorer-section"><div class="section-title">工作区</div><div class="tree-root"></div></div>`;
+    el.querySelectorAll<HTMLElement>("[data-tab]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        this.activeTabId = btn.getAttribute("data-tab");
+        this.renderTabs();
+        this.renderBreadcrumbs();
+        this.renderEditorHost();
+        this.renderStatus();
+        this.renderRightbar();
         this.renderSidebarBody();
-      } else {
-        await this.openFile(fullPath);
-      }
+      });
     });
-
-    const container = document.createElement("div");
-    container.appendChild(row);
-    if (isDir && this.expanded.has(fullPath)) {
-      const kids = this.treeCache.get(fullPath);
-      if (!kids) {
-        void this.ensureTree(fullPath);
-      } else {
-        const childWrap = document.createElement("div");
-        childWrap.className = "tree-children";
-        for (const kid of kids) {
-          childWrap.appendChild(this.buildTreeNode(kid.path, kid.name, kid.isDirectory));
-        }
-        container.appendChild(childWrap);
-      }
-    }
-    return container;
+    const treeRoot = el.querySelector(".tree-root") as HTMLElement;
+    this.renderTreeNode(treeRoot, this.workspace, 0);
   }
 
-  private renderCompareSidebar(el: HTMLElement): void {
-    el.innerHTML = `
-      <div class="sidebar-actions">
-        <div class="panel-form" style="padding:0;width:100%">
-          <label>目录 A
-            <div class="row">
-              <input type="text" id="cmp-a" value="${escapeAttr(this.settings.compareDirA || "")}" />
-              <button type="button" id="pick-a">…</button>
-            </div>
-          </label>
-          <label>目录 B
-            <div class="row">
-              <input type="text" id="cmp-b" value="${escapeAttr(this.settings.compareDirB || "")}" />
-              <button type="button" id="pick-b">…</button>
-            </div>
-          </label>
-          <label style="flex-direction:row;align-items:center;gap:8px">
-            <input type="checkbox" id="cmp-ws" ${this.settings.ignoreWhitespace ? "checked" : ""} />
-            忽略空白
-          </label>
-          <button type="button" class="primary" id="cmp-run" ${this.compareBusy ? "disabled" : ""}>
-            ${this.compareBusy ? "比对中…" : "开始比对"}
-          </button>
+  private renderTreeNode(container: HTMLElement, dirPath: string, depth: number): void {
+    const kids = this.treeCache.get(dirPath);
+    if (!kids) {
+      void this.ensureTree(dirPath);
+      return;
+    }
+    for (const entry of kids) {
+      const fullPath = entry.path;
+      const isDir = entry.isDirectory;
+      const row = document.createElement("div");
+      row.className = "tree-row";
+      row.style.paddingLeft = `${8 + depth * 12}px`;
+      const twist = document.createElement("span");
+      twist.className = "twist";
+      twist.textContent = isDir ? (this.expanded.has(fullPath) ? "▾" : "▸") : "";
+      const label = document.createElement("button");
+      label.type = "button";
+      label.className = "tree-label";
+      label.textContent = entry.name;
+      row.appendChild(twist);
+      row.appendChild(label);
+      container.appendChild(row);
+      label.addEventListener("click", async () => {
+        if (isDir) {
+          if (this.expanded.has(fullPath)) this.expanded.delete(fullPath);
+          else {
+            this.expanded.add(fullPath);
+            await this.ensureTree(fullPath);
+          }
+          this.renderSidebarBody();
+        } else {
+          await this.openFile(fullPath);
+        }
+      });
+      if (isDir && this.expanded.has(fullPath)) {
+        this.renderTreeNode(container, fullPath, depth + 1);
+      }
+    }
+  }
+
+  private openSettingsModal(category?: string): void {
+    this.closeManageMenu();
+    this.settingsOpen = true;
+    if (category) this.settingsCategory = category;
+    this.renderSettingsModal();
+    this.renderActivity();
+  }
+
+  private closeSettingsModal(): void {
+    if (!this.settingsOpen) return;
+    this.settingsOpen = false;
+    this.root.querySelector(".settings-modal")?.remove();
+    this.renderActivity();
+  }
+
+  private renderSettingsModal(): void {
+    let overlay = this.root.querySelector(".settings-modal") as HTMLElement | null;
+    if (!this.settingsOpen) {
+      overlay?.remove();
+      return;
+    }
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.className = "settings-modal";
+      this.root.appendChild(overlay);
+    }
+
+    const cats: { id: string; label: string }[] = [
+      { id: "common", label: "常用设置" },
+      { id: "editor", label: "文本编辑器" },
+      { id: "workbench", label: "工作台" },
+      { id: "window", label: "窗口" },
+      { id: "chat", label: "聊天" },
+      { id: "features", label: "功能" },
+      { id: "application", label: "应用程序" },
+      { id: "security", label: "安全性" },
+      { id: "extensions", label: "扩展" },
+    ];
+    const filter = this.settingsFilter.trim().toLowerCase();
+    const visibleCats = filter
+      ? cats.filter((c) => c.label.toLowerCase().includes(filter))
+      : cats;
+    const active =
+      visibleCats.find((c) => c.id === this.settingsCategory)?.id ||
+      visibleCats[0]?.id ||
+      "common";
+    this.settingsCategory = active;
+    const catLabel = cats.find((c) => c.id === active)?.label || "设置";
+
+    overlay.innerHTML = `
+      <div class="settings-dialog" role="dialog" aria-label="设置">
+        <div class="settings-top">
+          <div class="settings-title">设置</div>
+          <div class="settings-search-wrap">
+            <input type="text" id="settings-search" placeholder="搜索设置" value="${escapeAttr(
+              this.settingsFilter,
+            )}" />
+          </div>
+          <div class="settings-top-actions">
+            <button type="button" class="ghost" data-settings-act="sync" disabled>备份和同步设置</button>
+            <button type="button" class="icon-btn" data-settings-act="close" title="关闭">×</button>
+          </div>
         </div>
-      </div>
-      <div id="cmp-list"></div>
-    `;
-    const aInput = el.querySelector("#cmp-a") as HTMLInputElement;
-    const bInput = el.querySelector("#cmp-b") as HTMLInputElement;
-    const ws = el.querySelector("#cmp-ws") as HTMLInputElement;
-    el.querySelector("#pick-a")!.addEventListener("click", async () => {
-      const p = await window.easycode.pickFolder();
-      if (p) {
-        aInput.value = p;
-        this.settings.compareDirA = p;
-      }
+        <div class="settings-tabs">
+          <button type="button" class="active">用户</button>
+          <button type="button" disabled title="即将推出">工作区</button>
+        </div>
+        <div class="settings-body">
+          <nav class="settings-nav">
+            ${visibleCats
+              .map(
+                (c) =>
+                  `<button type="button" class="${
+                    c.id === active ? "active" : ""
+                  }" data-settings-cat="${c.id}">${escapeHtml(c.label)}</button>`,
+              )
+              .join("")}
+          </nav>
+          <div class="settings-content">
+            <h2>${escapeHtml(catLabel)}</h2>
+            <div class="settings-fields" id="settings-fields"></div>
+          </div>
+        </div>
+      </div>`;
+
+    const fields = overlay.querySelector("#settings-fields") as HTMLElement;
+    this.renderSettingsCategory(fields, active);
+
+    overlay.querySelector("#settings-search")?.addEventListener("input", (e) => {
+      this.settingsFilter = (e.target as HTMLInputElement).value;
+      this.renderSettingsModal();
+      const input = this.root.querySelector("#settings-search") as HTMLInputElement | null;
+      input?.focus();
+      input?.setSelectionRange(input.value.length, input.value.length);
     });
-    el.querySelector("#pick-b")!.addEventListener("click", async () => {
-      const p = await window.easycode.pickFolder();
-      if (p) {
-        bInput.value = p;
-        this.settings.compareDirB = p;
-      }
-    });
-    el.querySelector("#cmp-run")!.addEventListener("click", () => {
-      this.settings.compareDirA = aInput.value.trim();
-      this.settings.compareDirB = bInput.value.trim();
-      this.settings.ignoreWhitespace = ws.checked;
-      void this.runCompare();
-    });
-
-    const list = el.querySelector("#cmp-list")!;
-    if (!this.compareResult) {
-      list.innerHTML = `<div class="empty-hint">选择两个目录后开始比对。<br/>引擎：E:\\tools\\compare</div>`;
-      return;
-    }
-    if (!this.compareResult.changes.length) {
-      list.innerHTML = `<div class="empty-hint">无差异（在忽略规则下）。</div>`;
-      return;
-    }
-    const ul = document.createElement("ul");
-    ul.className = "change-list";
-    for (const c of this.compareResult.changes) {
-      const li = document.createElement("li");
-      if (c.rel === this.activeChangeRel) li.classList.add("active");
-      li.innerHTML = `<span class="kind ${c.kind}">${KIND_LABEL[c.kind] || c.kind}</span><span>${escapeHtml(c.rel)}</span>`;
-      li.addEventListener("click", () => this.openChange(c));
-      ul.appendChild(li);
-    }
-    list.appendChild(ul);
-    const summary = document.createElement("div");
-    summary.className = "empty-hint";
-    summary.textContent = `仅A=${this.compareResult.only_a} 仅B=${this.compareResult.only_b} 共同=${this.compareResult.common}`;
-    list.appendChild(summary);
-  }
-
-  private async renderExtensions(el: HTMLElement): Promise<void> {
-    this.plugins = await window.easycode.listPlugins();
-    const actions = document.createElement("div");
-    actions.className = "sidebar-actions";
-    actions.innerHTML = `<button type="button" class="primary" id="ext-install">从文件夹安装…</button>`;
-    el.innerHTML = "";
-    el.appendChild(actions);
-    actions.querySelector("#ext-install")!.addEventListener("click", () => void this.installExtension());
-
-    if (!this.plugins.length) {
-      const hint = document.createElement("div");
-      hint.className = "empty-hint";
-      hint.textContent = "未发现扩展（extensions/）";
-      el.appendChild(hint);
-      return;
-    }
-
-    for (const p of this.plugins) {
-      const item = document.createElement("div");
-      item.className = "plugin-item";
-      item.dataset.id = p.id;
-      item.innerHTML = `
-        <h4>${escapeHtml(p.name)} <small style="color:var(--muted)">${escapeHtml(p.version || "")}</small></h4>
-        <p>${escapeHtml(p.description || "")}</p>
-        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted)">
-          <input type="checkbox" data-enable="${escapeAttr(p.id)}" ${p.enabled ? "checked" : ""} />
-          启用
-        </label>
-        ${
-          p.installed
-            ? `<button type="button" data-uninstall="${escapeAttr(p.id)}" style="margin-top:8px">卸载</button>`
-            : ""
-        }
-      `;
-      el.appendChild(item);
-    }
-
-    el.querySelectorAll<HTMLInputElement>("[data-enable]").forEach((input) => {
-      input.addEventListener("change", async () => {
-        const id = input.getAttribute("data-enable")!;
-        this.plugins = await window.easycode.setPluginEnabled(id, input.checked);
-        const st = await window.easycode.lspRestart();
-        this.applyLspStatus(st);
-        this.renderStatus();
-        this.showToast(`${id} 已${input.checked ? "启用" : "禁用"}`);
+    overlay.querySelectorAll<HTMLButtonElement>("[data-settings-cat]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        this.settingsCategory = btn.getAttribute("data-settings-cat") || "common";
+        this.renderSettingsModal();
       });
     });
-
-    el.querySelectorAll<HTMLButtonElement>("[data-uninstall]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const id = btn.getAttribute("data-uninstall")!;
-        const ok = window.confirm(`确定卸载扩展「${id}」吗？`);
-        if (!ok) return;
-        this.plugins = await window.easycode.uninstallPlugin(id);
-        const st = await window.easycode.lspRestart();
-        this.applyLspStatus(st);
-        this.renderStatus();
-        this.showToast(`已卸载 ${id}`);
-        this.renderSidebarBody();
-      });
+    overlay.querySelector('[data-settings-act="close"]')?.addEventListener("click", () =>
+      this.closeSettingsModal(),
+    );
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) this.closeSettingsModal();
     });
+    overlay.querySelector(".settings-dialog")?.addEventListener("click", (e) =>
+      e.stopPropagation(),
+    );
   }
 
-  private renderSettings(el: HTMLElement): void {
+  private renderSettingsCategory(el: HTMLElement, category: string): void {
     const dt = this.settings.defaultTerminal || "powershell";
-    el.innerHTML = `
-      <div class="panel-form">
-        <label class="checkbox-row">
-          <input type="checkbox" id="set-autoSave" ${this.settings.autoSave ? "checked" : ""} />
-          自动保存
-        </label>
-        <label class="checkbox-row">
-          <input type="checkbox" id="set-autoLang" ${
+    const soon = `<div class="settings-soon">此分类的更多选项即将推出。</div>`;
+
+    if (category === "common") {
+      el.innerHTML = `
+        <div class="settings-item">
+          <div class="settings-item-title">Auto Save</div>
+          <div class="settings-item-desc">控制编辑器是否自动保存文件。</div>
+          <label class="checkbox-row"><input type="checkbox" id="set-autoSave" ${
+            this.settings.autoSave ? "checked" : ""
+          } /> 自动保存</label>
+        </div>
+        <div class="settings-item">
+          <div class="settings-item-title">Auto Detect Language</div>
+          <div class="settings-item-desc">根据文件扩展名自动识别语言。</div>
+          <label class="checkbox-row"><input type="checkbox" id="set-autoLang" ${
             this.settings.autoDetectLanguage ? "checked" : ""
-          } />
-          自动识别语言
-        </label>
-        <label class="checkbox-row">
-          <input type="checkbox" id="set-autoEnc" ${
+          } /> 自动识别语言</label>
+        </div>
+        <div class="settings-item">
+          <div class="settings-item-title">Auto Detect Encoding</div>
+          <div class="settings-item-desc">打开文件时自动识别文本编码。</div>
+          <label class="checkbox-row"><input type="checkbox" id="set-autoEnc" ${
             this.settings.autoDetectEncoding ? "checked" : ""
-          } />
-          自动识别编码
-        </label>
-        <label>默认终端
+          } /> 自动识别编码</label>
+        </div>
+        <div class="settings-item">
+          <div class="settings-item-title">Default Terminal</div>
+          <div class="settings-item-desc">新建终端时使用的默认 Shell。</div>
           <select id="set-defaultTerm">
             <option value="powershell" ${dt === "powershell" ? "selected" : ""}>PowerShell</option>
             <option value="cmd" ${dt === "cmd" ? "selected" : ""}>CMD</option>
             <option value="gitbash" ${dt === "gitbash" ? "selected" : ""}>Git Bash</option>
           </select>
-        </label>
-        <label>字号
+        </div>`;
+    } else if (category === "editor") {
+      el.innerHTML = `
+        <div class="settings-item">
+          <div class="settings-item-title">Font Size</div>
+          <div class="settings-item-desc">以像素为单位控制字号。</div>
           <input type="number" id="set-fontSize" min="10" max="28" value="${this.settings.fontSize}" />
-        </label>
-        <label>字体
+        </div>
+        <div class="settings-item">
+          <div class="settings-item-title">Font Family</div>
+          <div class="settings-item-desc">控制字体系列。</div>
           <input type="text" id="set-fontFamily" value="${escapeAttr(this.settings.fontFamily)}" />
-        </label>
-        <label class="checkbox-row">
-          <input type="checkbox" id="set-wrap" ${this.settings.wordWrap ? "checked" : ""} />
-          自动换行
-        </label>
-        <label>clangd 命令路径 — 由 clangd 扩展使用，非编辑器内置
-          <input type="text" id="set-clangd" value="${escapeAttr(this.clangdCommand())}" />
-        </label>
-        <label>Python 路径
-          <input type="text" id="set-python" value="${escapeAttr(this.settings.pythonPath)}" />
-        </label>
-        <label>compare 根目录
-          <input type="text" id="set-compare" value="${escapeAttr(this.settings.compareRoot)}" />
-        </label>
-        <button type="button" class="primary" id="set-save">保存设置</button>
-      </div>
-    `;
-    el.querySelector("#set-save")!.addEventListener("click", async () => {
-      const clangdCommand =
-        (el.querySelector("#set-clangd") as HTMLInputElement).value.trim() || "clangd";
-      const patch: Partial<AppSettings> = {
-        autoSave: (el.querySelector("#set-autoSave") as HTMLInputElement).checked,
-        autoDetectLanguage: (el.querySelector("#set-autoLang") as HTMLInputElement).checked,
-        autoDetectEncoding: (el.querySelector("#set-autoEnc") as HTMLInputElement).checked,
-        defaultTerminal: (el.querySelector("#set-defaultTerm") as HTMLSelectElement)
-          .value as ShellKind,
-        fontSize: Number((el.querySelector("#set-fontSize") as HTMLInputElement).value) || 14,
-        fontFamily: (el.querySelector("#set-fontFamily") as HTMLInputElement).value,
-        wordWrap: (el.querySelector("#set-wrap") as HTMLInputElement).checked,
-        pythonPath: (el.querySelector("#set-python") as HTMLInputElement).value.trim() || "python",
-        compareRoot: (el.querySelector("#set-compare") as HTMLInputElement).value.trim(),
-        extensionSettings: {
-          ...this.settings.extensionSettings,
-          clangd: {
-            ...(this.settings.extensionSettings?.clangd || {}),
-            command: clangdCommand,
-          },
-        },
-      };
+        </div>
+        <div class="settings-item">
+          <div class="settings-item-title">Word Wrap</div>
+          <div class="settings-item-desc">控制行是否换行。</div>
+          <label class="checkbox-row"><input type="checkbox" id="set-wrap" ${
+            this.settings.wordWrap ? "checked" : ""
+          } /> 自动换行</label>
+        </div>`;
+    } else if (category === "workbench") {
+      el.innerHTML = `
+        <div class="settings-item">
+          <div class="settings-item-title">Primary Side Bar</div>
+          <div class="settings-item-desc">控制主侧栏是否默认可见。</div>
+          <label class="checkbox-row"><input type="checkbox" id="set-showSidebar" ${
+            this.settings.showSidebar ? "checked" : ""
+          } /> 显示主侧栏</label>
+        </div>
+        <div class="settings-item">
+          <div class="settings-item-title">Panel</div>
+          <div class="settings-item-desc">控制底部面板是否默认可见。</div>
+          <label class="checkbox-row"><input type="checkbox" id="set-showPanel" ${
+            this.settings.showPanel ? "checked" : ""
+          } /> 显示面板</label>
+        </div>
+        <div class="settings-item">
+          <div class="settings-item-title">Chat Side Bar</div>
+          <div class="settings-item-desc">控制聊天侧栏是否默认可见。</div>
+          <label class="checkbox-row"><input type="checkbox" id="set-showRight" ${
+            this.settings.showRightSidebar ? "checked" : ""
+          } /> 显示聊天侧栏</label>
+        </div>`;
+    } else {
+      el.innerHTML = soon;
+      return;
+    }
+
+    this.bindSettingsFields(el);
+  }
+
+  private bindSettingsFields(el: HTMLElement): void {
+    const persist = async (patch: Partial<AppSettings>) => {
       this.settings = await window.easycode.setSettings(patch);
       this.applyEditorOptions();
-      this.showToast("设置已保存");
-      this.renderEditorHost();
+      this.applyLayoutClasses();
+      this.renderTitlebar();
+      if ("showPanel" in patch && this.settings.showPanel) {
+        this.renderBottomPanel();
+      }
+    };
+
+    const bindCheck = (id: string, key: keyof AppSettings) => {
+      el.querySelector(`#${id}`)?.addEventListener("change", () => {
+        const checked = (el.querySelector(`#${id}`) as HTMLInputElement).checked;
+        void persist({ [key]: checked } as Partial<AppSettings>);
+      });
+    };
+    bindCheck("set-autoSave", "autoSave");
+    bindCheck("set-autoLang", "autoDetectLanguage");
+    bindCheck("set-autoEnc", "autoDetectEncoding");
+    bindCheck("set-wrap", "wordWrap");
+    bindCheck("set-showSidebar", "showSidebar");
+    bindCheck("set-showPanel", "showPanel");
+    bindCheck("set-showRight", "showRightSidebar");
+
+    el.querySelector("#set-defaultTerm")?.addEventListener("change", () => {
+      void persist({
+        defaultTerminal: (el.querySelector("#set-defaultTerm") as HTMLSelectElement)
+          .value as ShellKind,
+      });
+    });
+    el.querySelector("#set-fontSize")?.addEventListener("change", () => {
+      void persist({
+        fontSize: Number((el.querySelector("#set-fontSize") as HTMLInputElement).value) || 14,
+      });
+    });
+    el.querySelector("#set-fontFamily")?.addEventListener("change", () => {
+      void persist({
+        fontFamily: (el.querySelector("#set-fontFamily") as HTMLInputElement).value,
+      });
     });
   }
 
   private renderTabs(): void {
-    const el = this.root.querySelector(".tabs")!;
+    const el = this.root.querySelector(".tabs");
+    if (!el) return;
     if (!this.tabs.length) {
       el.innerHTML = "";
       return;
@@ -1052,7 +1416,9 @@ class App {
     el.innerHTML = this.tabs
       .map(
         (t) => `
-      <button type="button" class="tab ${t.id === this.activeTabId ? "active" : ""}" data-id="${escapeAttr(t.id)}">
+      <button type="button" class="tab ${t.id === this.activeTabId ? "active" : ""}" data-id="${escapeAttr(
+        t.id,
+      )}">
         <span class="${t.dirty ? "dirty" : ""}">${escapeHtml(t.name)}${t.dirty ? " ●" : ""}</span>
         <span class="close" data-close="${escapeAttr(t.id)}">×</span>
       </button>`,
@@ -1068,12 +1434,28 @@ class App {
         }
         this.activeTabId = tabEl.getAttribute("data-id");
         this.renderTabs();
+        this.renderBreadcrumbs();
         this.renderEditorHost();
         this.renderStatus();
         this.renderRightbar();
-        this.renderTitlebar();
+        if (this.activity === "explorer") this.renderSidebarBody();
       });
     });
+  }
+
+  private renderBreadcrumbs(): void {
+    const el = this.root.querySelector(".breadcrumbs");
+    if (!el) return;
+    const tab = this.activeTab();
+    if (!tab) {
+      el.innerHTML = "";
+      return;
+    }
+    const rel = this.relativePath(tab.path);
+    const parts = rel.replace(/\\/g, "/").split("/").filter(Boolean);
+    el.innerHTML = parts.map((p) => `<span class="crumb">${escapeHtml(p)}</span>`).join(
+      `<span class="crumb-sep">›</span>`,
+    );
   }
 
   private renderEditorHost(): void {
@@ -1081,36 +1463,32 @@ class App {
     const tab = this.activeTab();
     if (!tab) {
       this.disposeEditors();
-      host.innerHTML = `<div class="placeholder">打开文件开始编辑<br/><span style="font-size:12px">扩展语言服务 · 目录比对 · 插件</span></div>`;
+      host.innerHTML = `
+        <div class="placeholder">
+          <div class="welcome-brand">Easycode</div>
+          <div class="welcome-sub">干净的代码编辑器</div>
+          <div class="welcome-actions">
+            <button type="button" data-welcome="open"><span>打开文件夹</span><kbd>Ctrl+O</kbd></button>
+            <button type="button" data-welcome="palette"><span>命令面板</span><kbd>Ctrl+Shift+P</kbd></button>
+          </div>
+        </div>`;
+      host.querySelector('[data-welcome="open"]')?.addEventListener("click", () =>
+        void this.openFolder(),
+      );
+      host.querySelector('[data-welcome="palette"]')?.addEventListener("click", () =>
+        this.toggleCommandPalette(true),
+      );
       return;
     }
 
-    host.innerHTML = `<div class="monaco" id="monaco-root"></div>`;
+    const editorConnected =
+      !!this.editor && this.editor.getContainerDomNode().isConnected;
+    if (!editorConnected || host.querySelector(".placeholder") || !host.querySelector("#monaco-root")) {
+      if (this.editor) this.disposeEditors();
+      host.innerHTML = `<div class="monaco" id="monaco-root"></div>`;
+    }
     this.editorEl = host.querySelector("#monaco-root");
 
-    if (tab.view === "diff" && tab.diff) {
-      this.disposeCodeEditor();
-      const original = monaco.editor.createModel(
-        tab.diff.original,
-        tab.language,
-        monaco.Uri.parse(pathToUri((tab.diff.originalPath || tab.path) + ".left")),
-      );
-      const modified = monaco.editor.createModel(
-        tab.diff.modified,
-        tab.language,
-        monaco.Uri.parse(pathToUri((tab.diff.modifiedPath || tab.path) + ".right")),
-      );
-      this.diffEditor = monaco.editor.createDiffEditor(this.editorEl!, {
-        ...this.editorOptions(),
-        readOnly: true,
-        renderSideBySide: true,
-        automaticLayout: true,
-      });
-      this.diffEditor.setModel({ original, modified });
-      return;
-    }
-
-    this.disposeDiffEditor();
     const uri = monaco.Uri.file(tab.path);
     let model = monaco.editor.getModel(uri);
     if (!model) {
@@ -1130,33 +1508,35 @@ class App {
         this.renderStatus();
       });
       this.editor.onDidChangeModelContent(() => {
+        if (this.ignoringModelChange) return;
         const t = this.activeTab();
-        if (!t || t.view === "diff" || !this.editor) return;
+        if (!t || !this.editor) return;
         t.content = this.editor.getValue();
         t.dirty = t.content !== t.original;
         this.renderTabs();
-        this.renderTitlebar();
+        if (this.activity === "explorer") this.renderSidebarBody();
         if (this.changeTimer) window.clearTimeout(this.changeTimer);
         this.changeTimer = window.setTimeout(() => {
           void this.lsp.didChange(t.path, t.content);
         }, 300);
-        if (this.settings.autoSave) {
-          if (this.autoSaveTimer) window.clearTimeout(this.autoSaveTimer);
-          this.autoSaveTimer = window.setTimeout(() => {
-            void this.saveActive();
-          }, 1000);
-        }
+        this.scheduleAutoSave();
       });
     } else {
-      this.editor.setModel(model);
+      if (this.editor.getModel() !== model) this.editor.setModel(model);
       this.editor.updateOptions(this.editorOptions());
       this.editor.layout();
     }
   }
 
+  private scheduleAutoSave(): void {
+    if (!this.settings.autoSave) return;
+    if (this.autoSaveTimer) window.clearTimeout(this.autoSaveTimer);
+    this.autoSaveTimer = window.setTimeout(() => void this.saveActive(), 800);
+  }
+
   private editorOptions(): monaco.editor.IStandaloneEditorConstructionOptions {
     return {
-      theme: "vs-dark",
+      theme: "easycode-dark",
       fontSize: this.settings.fontSize,
       fontFamily: this.settings.fontFamily,
       wordWrap: this.settings.wordWrap ? "on" : "off",
@@ -1168,95 +1548,292 @@ class App {
 
   private applyEditorOptions(): void {
     this.editor?.updateOptions(this.editorOptions());
-    this.diffEditor?.updateOptions(this.editorOptions());
   }
 
-  private disposeCodeEditor(): void {
+  private disposeEditors(): void {
     this.editor?.dispose();
     this.editor = null;
   }
 
-  private disposeDiffEditor(): void {
-    this.diffEditor?.dispose();
-    this.diffEditor = null;
+  private renderRightbar(): void {
+    const body = this.root.querySelector(".rightbar-body") as HTMLElement | null;
+    if (!body) return;
+    body.innerHTML = chatPlaceholderHtml({ withInput: true });
   }
 
-  private disposeEditors(): void {
-    this.disposeCodeEditor();
-    this.disposeDiffEditor();
+  private renderBottomPanel(): void {
+    this.renderPanelChrome();
+    const view = this.settings.panelView || "terminal";
+    const map: Record<Exclude<PanelView, "chat">, string> = {
+      problems: "panel-problems",
+      output: "panel-output",
+      debug: "panel-debug",
+      terminal: "term-host",
+    };
+    // Chat lives only in the right sidebar — never in the bottom panel.
+    const activeView: Exclude<PanelView, "chat"> =
+      view === "chat" ? "terminal" : view;
+    for (const [k, id] of Object.entries(map)) {
+      const node = this.root.querySelector("#" + id) as HTMLElement | null;
+      if (!node) continue;
+      const active = k === activeView;
+      node.hidden = !active;
+      if (active) node.removeAttribute("hidden");
+    }
+
+    if (activeView === "problems") {
+      const el = this.root.querySelector("#panel-problems") as HTMLElement;
+      renderProblemsList(el, (item) => void this.openProblem(item));
+    } else if (activeView === "output") {
+      const el = this.root.querySelector("#panel-output") as HTMLElement;
+      el.innerHTML = outputPlaceholderHtml();
+    } else if (activeView === "debug") {
+      const el = this.root.querySelector("#panel-debug") as HTMLElement;
+      el.innerHTML = debugPlaceholderHtml();
+    } else if (activeView === "terminal") {
+      this.ensureTerminalPanel();
+      this.renderPanelChrome();
+      this.terminalPanel?.layout();
+    }
   }
 
-  private renderStatus(): void {
-    const el = this.root.querySelector(".status") as HTMLElement;
+  private renderPanelChrome(): void {
+    const el = this.root.querySelector(".panel-chrome");
     if (!el) return;
-    const tab = this.activeTab();
-    const path = tab?.path || this.workspace || "未打开工作区";
-    const lspLabel =
-      this.lspRunning && this.lspServers.length
-        ? `LSP: ${this.lspServers.join(", ")}`
-        : "LSP ○";
-    const enc = (tab?.encoding || "utf-8").toUpperCase();
-    const lang = tab?.language || "plaintext";
-    el.classList.toggle("warn", !this.lspRunning);
+    const views: { id: Exclude<PanelView, "chat">; label: string }[] = [
+      { id: "problems", label: "问题" },
+      { id: "output", label: "输出" },
+      { id: "debug", label: "调试控制台" },
+      { id: "terminal", label: "终端" },
+    ];
+    const panelView =
+      this.settings.panelView === "chat" ? "terminal" : this.settings.panelView || "terminal";
+    const termTabs =
+      panelView === "terminal" && this.terminalPanel ? this.terminalPanel.getTabs() : [];
+    const activeTerm = termTabs.find((t) => t.active);
     el.innerHTML = `
-      <span>${escapeHtml(lspLabel)}</span>
-      <span class="grow" title="${escapeAttr(path)}">${escapeHtml(path)}</span>
-      <span class="clickable" data-act="encoding" title="更改编码">${escapeHtml(enc)}</span>
-      <span>${escapeHtml(lang)}</span>
-      <span>${escapeHtml(this.cursorLabel)}</span>
-    `;
-    el.querySelector('[data-act="encoding"]')?.addEventListener("click", () => {
-      const t = this.activeTab();
-      if (!t || t.view === "diff") return;
-      const next = window.prompt("文件编码（保存时使用）", t.encoding || "utf-8");
-      if (!next || !next.trim()) return;
-      t.encoding = next.trim();
-      this.renderStatus();
-      this.renderRightbar();
+      <div class="panel-views">
+        ${views
+          .map(
+            (v) =>
+              `<button type="button" class="${
+                panelView === v.id ? "active" : ""
+              }" data-panel="${v.id}">${v.label}</button>`,
+          )
+          .join("")}
+      </div>
+      ${
+        panelView === "terminal"
+          ? `<div class="term-tabs-inline">
+              ${termTabs
+                .map(
+                  (t) =>
+                    `<button type="button" class="term-tab ${t.active ? "active" : ""}" data-term="${escapeAttr(
+                      t.id,
+                    )}">${escapeHtml(t.title)}</button>`,
+                )
+                .join("")}
+              <div class="spacer"></div>
+              ${
+                activeTerm
+                  ? `<button type="button" data-act="kill-term" title="关闭终端">×</button>`
+                  : ""
+              }
+              <div class="term-menu panel-new">
+                <button type="button" data-act="new-term">+</button>
+                <div class="drop">
+                  <button type="button" data-shell="powershell">PowerShell</button>
+                  <button type="button" data-shell="cmd">CMD</button>
+                  <button type="button" data-shell="gitbash">Git Bash</button>
+                </div>
+              </div>
+            </div>`
+          : ""
+      }`;
+
+    el.querySelectorAll<HTMLButtonElement>("[data-panel]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        void this.setPanelView(btn.getAttribute("data-panel") as PanelView);
+      });
+    });
+    el.querySelectorAll<HTMLElement>("[data-term]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        this.terminalPanel?.activate(btn.getAttribute("data-term")!);
+        this.renderPanelChrome();
+      });
+    });
+    el.querySelector('[data-act="kill-term"]')?.addEventListener("click", async () => {
+      if (!activeTerm) return;
+      await this.terminalPanel?.close(activeTerm.id);
+      this.renderPanelChrome();
+    });
+    const newMenu = el.querySelector(".panel-new") as HTMLElement | null;
+    el.querySelector('[data-act="new-term"]')?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      newMenu?.classList.toggle("open");
+    });
+    newMenu?.querySelectorAll<HTMLButtonElement>("[data-shell]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        newMenu.classList.remove("open");
+        void this.openTerminal(btn.getAttribute("data-shell") as ShellKind);
+      });
     });
   }
 
-  private renderCommandPalette(): void {
-    document.querySelector(".command-palette")?.remove();
-    if (!this.commandOpen) return;
-    const cmds = this.commands().filter((c) =>
-      c.title.toLowerCase().includes(this.commandFilter.toLowerCase()),
+  private bindPanelResize(): void {
+    const sash = this.root.querySelector(".panel-sash") as HTMLElement | null;
+    const panel = this.root.querySelector(".bottom-panel") as HTMLElement | null;
+    if (!sash || !panel) return;
+    let startY = 0;
+    let startH = 0;
+    const onMove = (e: MouseEvent) => {
+      const delta = startY - e.clientY;
+      const next = Math.max(120, Math.min(480, startH + delta));
+      this.settings.panelHeight = next;
+      panel.style.setProperty("--panel-h", `${next}px`);
+      this.terminalPanel?.layout();
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      void window.easycode.setSettings({ panelHeight: this.settings.panelHeight });
+    };
+    const onDown = (e: MouseEvent) => {
+      e.preventDefault();
+      startY = e.clientY;
+      startH = this.settings.panelHeight || 220;
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    };
+    sash.addEventListener("mousedown", onDown);
+    this.panelResizeCleanup = () => sash.removeEventListener("mousedown", onDown);
+  }
+
+  private async openProblem(item: ProblemItem): Promise<void> {
+    await this.openFile(item.path);
+    const ed = this.editor;
+    if (!ed) return;
+    ed.setPosition({ lineNumber: item.startLineNumber, column: item.startColumn });
+    ed.revealPositionInCenter({
+      lineNumber: item.startLineNumber,
+      column: item.startColumn,
+    });
+    ed.focus();
+  }
+
+  private refreshProblemsUi(): void {
+    this.renderStatus();
+    if (this.settings.showPanel && this.settings.panelView === "problems") {
+      const el = this.root.querySelector("#panel-problems") as HTMLElement | null;
+      if (el) renderProblemsList(el, (item) => void this.openProblem(item));
+    }
+  }
+
+  private detectEol(text: string): string {
+    if (text.includes("\r\n")) return "CRLF";
+    if (text.includes("\n")) return "LF";
+    return "LF";
+  }
+
+  private renderStatus(): void {
+    const el = this.root.querySelector(".status");
+    if (!el) return;
+    const tab = this.activeTab();
+    const { errors, warnings } = countProblems();
+    const pathLabel = tab?.path || this.workspace || "未打开工作区";
+    const lsp =
+      this.lspRunning && this.lspServers.length
+        ? `<button type="button" class="status-item" data-act="lsp">${escapeHtml(
+            this.lspServers.join(", "),
+          )}</button>`
+        : "";
+    el.innerHTML = `
+      <div class="status-left">
+        <button type="button" class="status-item problems-count" data-act="problems" title="问题">
+          <span class="err">● ${errors}</span>
+          <span class="warn">● ${warnings}</span>
+        </button>
+        ${lsp}
+        <span class="status-item path" title="${escapeAttr(pathLabel)}">${escapeHtml(
+          tab ? tab.name : pathLabel,
+        )}</span>
+      </div>
+      <div class="status-right">
+        <span class="status-item">${escapeHtml(this.cursorLabel)}</span>
+        <span class="status-item">${escapeHtml(tab?.language || "plaintext")}</span>
+        <button type="button" class="status-item" data-act="encoding">${escapeHtml(
+          (tab?.encoding || "utf-8").toUpperCase(),
+        )}</button>
+        <span class="status-item">Spaces: 2</span>
+        <span class="status-item">${tab ? this.detectEol(tab.content) : "LF"}</span>
+        <button type="button" class="status-item" data-act="notify" title="通知（占位）">🔔</button>
+      </div>`;
+    el.querySelector('[data-act="problems"]')?.addEventListener("click", () =>
+      void this.setPanelView("problems"),
     );
-    const overlay = document.createElement("div");
-    overlay.className = "command-palette";
+    el.querySelector('[data-act="encoding"]')?.addEventListener("click", () => {
+      const t = this.activeTab();
+      if (!t) return;
+      const next = window.prompt("文件编码（保存时使用）", t.encoding || "utf-8");
+      if (!next) return;
+      t.encoding = next.trim() || "utf-8";
+      this.renderStatus();
+      this.renderRightbar();
+    });
+    el.querySelector('[data-act="notify"]')?.addEventListener("click", () =>
+      this.showToast("通知中心即将推出"),
+    );
+  }
+
+  private renderCommandPalette(): void {
+    let overlay = this.root.querySelector(".command-palette") as HTMLElement | null;
+    if (!this.commandOpen) {
+      overlay?.remove();
+      return;
+    }
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.className = "command-palette";
+      this.root.appendChild(overlay);
+    }
+    const cmds = this.buildCommands().filter((c) =>
+      c.label.toLowerCase().includes(this.commandFilter.toLowerCase()),
+    );
     overlay.innerHTML = `
-      <div class="box">
-        <input type="text" placeholder="输入命令…" value="${escapeAttr(this.commandFilter)}" />
-        <ul>
+      <div class="palette-box">
+        <input type="text" id="palette-input" placeholder="输入命令…" value="${escapeAttr(
+          this.commandFilter,
+        )}" />
+        <div class="palette-list">
           ${cmds
             .map(
               (c, i) =>
-                `<li class="${i === this.commandIndex ? "active" : ""}" data-i="${i}">${escapeHtml(c.title)}</li>`,
+                `<button type="button" class="palette-item ${
+                  i === this.commandIndex ? "active" : ""
+                }" data-idx="${i}"><span>${escapeHtml(c.label)}</span>${
+                  c.keys ? `<kbd>${escapeHtml(c.keys)}</kbd>` : ""
+                }</button>`,
             )
             .join("")}
-        </ul>
-      </div>
-    `;
-    const input = overlay.querySelector("input")!;
+        </div>
+      </div>`;
+    const input = overlay.querySelector("#palette-input") as HTMLInputElement;
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
     input.addEventListener("input", () => {
       this.commandFilter = input.value;
       this.commandIndex = 0;
       this.renderCommandPalette();
-      const again = document.querySelector(".command-palette input") as HTMLInputElement;
-      again?.focus();
-      again?.setSelectionRange(again.value.length, again.value.length);
     });
     input.addEventListener("keydown", (e) => {
       if (e.key === "ArrowDown") {
         e.preventDefault();
         this.commandIndex = Math.min(this.commandIndex + 1, cmds.length - 1);
         this.renderCommandPalette();
-        (document.querySelector(".command-palette input") as HTMLInputElement)?.focus();
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
         this.commandIndex = Math.max(this.commandIndex - 1, 0);
         this.renderCommandPalette();
-        (document.querySelector(".command-palette input") as HTMLInputElement)?.focus();
       } else if (e.key === "Enter") {
         e.preventDefault();
         const cmd = cmds[this.commandIndex];
@@ -1269,15 +1846,13 @@ class App {
     overlay.addEventListener("click", (e) => {
       if (e.target === overlay) this.toggleCommandPalette(false);
     });
-    overlay.querySelectorAll("li").forEach((li) => {
-      li.addEventListener("click", () => {
-        const i = Number(li.getAttribute("data-i"));
+    overlay.querySelectorAll<HTMLButtonElement>("[data-idx]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const cmd = cmds[Number(btn.getAttribute("data-idx"))];
         this.toggleCommandPalette(false);
-        cmds[i]?.run();
+        cmd?.run();
       });
     });
-    document.body.appendChild(overlay);
-    input.focus();
   }
 }
 
@@ -1293,5 +1868,7 @@ function escapeAttr(s: string): string {
   return escapeHtml(s);
 }
 
-const app = new App(document.getElementById("app")!);
-void app.start();
+const appRoot = document.getElementById("app");
+if (appRoot) {
+  void new App(appRoot).start();
+}

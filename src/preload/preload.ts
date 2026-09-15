@@ -29,22 +29,31 @@ const api = {
     ipcRenderer.invoke("fs:writeFile", filePath, content, encoding || "utf-8"),
   exists: (filePath: string): Promise<boolean> =>
     ipcRenderer.invoke("fs:exists", filePath),
-  compareRun: (
-    dirA: string,
-    dirB: string,
-    opts?: { ignoreWhitespace?: boolean },
-  ) => ipcRenderer.invoke("compare:run", dirA, dirB, opts || {}),
+  watchFile: (filePath: string) => ipcRenderer.invoke("fs:watch", filePath),
+  unwatchFile: (filePath: string) => ipcRenderer.invoke("fs:unwatch", filePath),
+  watchWorkspace: (root: string | null) =>
+    ipcRenderer.invoke("fs:watchWorkspace", root || ""),
+  onFileChanged: (cb: (data: { path: string }) => void) => {
+    const listener = (_: unknown, data: { path: string }) => cb(data);
+    ipcRenderer.on("fs:changed", listener);
+    return () => ipcRenderer.removeListener("fs:changed", listener);
+  },
+  onFileDeleted: (cb: (data: { path: string }) => void) => {
+    const listener = (_: unknown, data: { path: string }) => cb(data);
+    ipcRenderer.on("fs:deleted", listener);
+    return () => ipcRenderer.removeListener("fs:deleted", listener);
+  },
+  onTreeChanged: (cb: (data: { path: string; root: string }) => void) => {
+    const listener = (_: unknown, data: { path: string; root: string }) => cb(data);
+    ipcRenderer.on("fs:tree", listener);
+    return () => ipcRenderer.removeListener("fs:tree", listener);
+  },
   lspRequest: (method: string, params: unknown) =>
     ipcRenderer.invoke("lsp:request", method, params),
   lspNotify: (method: string, params: unknown) =>
     ipcRenderer.invoke("lsp:notify", method, params),
   lspStatus: () => ipcRenderer.invoke("lsp:status"),
   lspRestart: () => ipcRenderer.invoke("lsp:restart"),
-  listPlugins: () => ipcRenderer.invoke("plugins:list"),
-  setPluginEnabled: (id: string, enabled: boolean) =>
-    ipcRenderer.invoke("plugins:setEnabled", id, enabled),
-  installPluginFolder: () => ipcRenderer.invoke("plugins:installFolder"),
-  uninstallPlugin: (id: string) => ipcRenderer.invoke("plugins:uninstall", id),
   termList: () => ipcRenderer.invoke("term:list"),
   termCreate: (kind?: ShellKind) => ipcRenderer.invoke("term:create", kind),
   termWrite: (id: string, data: string) =>
@@ -52,6 +61,17 @@ const api = {
   termResize: (id: string, cols: number, rows: number) =>
     ipcRenderer.invoke("term:resize", id, cols, rows),
   termKill: (id: string) => ipcRenderer.invoke("term:kill", id),
+  windowMinimize: () => ipcRenderer.invoke("window:minimize"),
+  windowMaximize: () => ipcRenderer.invoke("window:maximize"),
+  windowClose: () => ipcRenderer.invoke("window:close"),
+  windowIsMaximized: () => ipcRenderer.invoke("window:isMaximized"),
+  windowToggleDevTools: () => ipcRenderer.invoke("window:toggleDevTools"),
+  windowReload: () => ipcRenderer.invoke("window:reload"),
+  onWindowMaximized: (cb: (maximized: boolean) => void) => {
+    const listener = (_: unknown, maximized: boolean) => cb(maximized);
+    ipcRenderer.on("window:maximized", listener);
+    return () => ipcRenderer.removeListener("window:maximized", listener);
+  },
   onMenu: (channel: string, cb: (...args: unknown[]) => void) => {
     const listener = (_: unknown, ...args: unknown[]) => cb(...args);
     ipcRenderer.on(channel, listener);

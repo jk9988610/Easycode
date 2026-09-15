@@ -1,4 +1,14 @@
-export type ActivityId = "explorer" | "compare" | "extensions" | "settings";
+export type ActivityId =
+  | "explorer"
+  | "search"
+  | "scm"
+  | "extensions"
+  | "settings"
+  | "account"
+  | "tasks";
+
+export type PanelView = "problems" | "output" | "debug" | "terminal" | "chat";
+export type RightView = "outline" | "info" | "chat";
 export type ShellKind = "powershell" | "cmd" | "gitbash";
 
 export interface DirEntry {
@@ -23,12 +33,9 @@ export interface AppSettings {
   showPanel: boolean;
   showRightSidebar: boolean;
   panelHeight: number;
+  panelView: PanelView;
+  rightView: RightView;
   defaultTerminal: ShellKind;
-  pythonPath: string;
-  compareRoot: string;
-  compareDirA: string;
-  compareDirB: string;
-  ignoreWhitespace: boolean;
   pluginsEnabled: Record<string, boolean>;
   extensionSettings: Record<string, Record<string, unknown>>;
 }
@@ -42,46 +49,6 @@ export interface EditorTab {
   dirty: boolean;
   language: string;
   encoding: string;
-  view?: "code" | "diff";
-  diff?: {
-    original: string;
-    modified: string;
-    originalPath?: string;
-    modifiedPath?: string;
-  };
-}
-
-export interface FileChange {
-  rel: string;
-  kind: string;
-  diff_lines: string[];
-  lines_a: string[];
-  lines_b: string[];
-  path_a: string | null;
-  path_b: string | null;
-}
-
-export interface CompareResult {
-  error: string | null;
-  only_a: number;
-  only_b: number;
-  common: number;
-  changes: FileChange[];
-}
-
-export interface PluginInfo {
-  id: string;
-  name: string;
-  description?: string;
-  version?: string;
-  enabled: boolean;
-  path: string;
-  installed: boolean;
-  contributes?: {
-    activity?: string;
-    languageServers?: unknown[];
-    commands?: { id: string; title: string }[];
-  };
 }
 
 export interface EasycodeApi {
@@ -100,11 +67,12 @@ export interface EasycodeApi {
     encoding?: string,
   ) => Promise<boolean>;
   exists: (filePath: string) => Promise<boolean>;
-  compareRun: (
-    dirA: string,
-    dirB: string,
-    opts?: { ignoreWhitespace?: boolean },
-  ) => Promise<CompareResult>;
+  watchFile: (filePath: string) => Promise<void>;
+  unwatchFile: (filePath: string) => Promise<void>;
+  watchWorkspace: (root: string | null) => Promise<void>;
+  onFileChanged: (cb: (data: { path: string }) => void) => () => void;
+  onFileDeleted: (cb: (data: { path: string }) => void) => () => void;
+  onTreeChanged: (cb: (data: { path: string; root: string }) => void) => () => void;
   lspRequest: (method: string, params: unknown) => Promise<unknown>;
   lspNotify: (method: string, params: unknown) => Promise<void>;
   lspStatus: () => Promise<{
@@ -113,10 +81,6 @@ export interface EasycodeApi {
     workspace: string | null;
   }>;
   lspRestart: () => Promise<{ running: boolean; servers?: string[] }>;
-  listPlugins: () => Promise<PluginInfo[]>;
-  setPluginEnabled: (id: string, enabled: boolean) => Promise<PluginInfo[]>;
-  installPluginFolder: () => Promise<PluginInfo[] | null>;
-  uninstallPlugin: (id: string) => Promise<PluginInfo[]>;
   termList: () => Promise<{ id: string; kind: ShellKind; title: string }[]>;
   termCreate: (
     kind?: ShellKind,
@@ -124,6 +88,13 @@ export interface EasycodeApi {
   termWrite: (id: string, data: string) => Promise<void>;
   termResize: (id: string, cols: number, rows: number) => Promise<void>;
   termKill: (id: string) => Promise<void>;
+  windowMinimize: () => Promise<void>;
+  windowMaximize: () => Promise<boolean>;
+  windowClose: () => Promise<void>;
+  windowIsMaximized: () => Promise<boolean>;
+  windowToggleDevTools: () => Promise<void>;
+  windowReload: () => Promise<void>;
+  onWindowMaximized: (cb: (maximized: boolean) => void) => () => void;
   onMenu: (channel: string, cb: (...args: unknown[]) => void) => () => void;
   onLspNotification: (
     cb: (data: { method: string; params: unknown }) => void,

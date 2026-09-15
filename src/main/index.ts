@@ -5,15 +5,16 @@ import { fileURLToPath } from "node:url";
 import { loadSettings, saveSettings, AppSettings } from "./settings";
 import { listDirChildren, readTextFile, writeTextFile, fileExists } from "./fsService";
 import { LanguageServerSession } from "./languageServer";
-import { runCompare } from "./compareBridge";
 import { PluginHost } from "./plugins";
 import { TerminalHost, type ShellKind } from "./terminal";
+import { FileWatcher } from "./fileWatcher";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let mainWindow: BrowserWindow | null = null;
 let pluginHost: PluginHost | null = null;
 let terminalHost: TerminalHost | null = null;
+let fileWatcher: FileWatcher | null = null;
 let settings: AppSettings = loadSettingsSafe();
 /** Active language servers keyed by server id (from extension contributes). */
 const servers = new Map<string, LanguageServerSession>();
@@ -30,19 +31,16 @@ function loadSettingsSafe(): AppSettings {
       fontSize: 14,
       fontFamily: "Cascadia Mono, Consolas, monospace",
       wordWrap: false,
-      autoSave: false,
+      autoSave: true,
       autoDetectLanguage: true,
       autoDetectEncoding: true,
       showSidebar: true,
       showPanel: false,
       showRightSidebar: false,
       panelHeight: 220,
+      panelView: "terminal",
+      rightView: "info",
       defaultTerminal: "powershell",
-      pythonPath: "python",
-      compareRoot: "E:\\tools\\compare",
-      compareDirA: "",
-      compareDirB: "",
-      ignoreWhitespace: false,
       pluginsEnabled: {},
       extensionSettings: {},
     };
@@ -61,7 +59,11 @@ function createWindow(): void {
     y: settings.windowY,
     minWidth: 900,
     minHeight: 560,
+    frame: false,
+    resizable: true,
+    thickFrame: true,
     backgroundColor: "#1a1f24",
+    show: false,
     webPreferences: {
       preload: preloadPath(),
       contextIsolation: true,
@@ -76,6 +78,16 @@ function createWindow(): void {
   } else {
     void mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
   }
+
+  mainWindow.once("ready-to-show", () => {
+    mainWindow?.show();
+  });
+
+  const sendMaximized = () => {
+    mainWindow?.webContents.send("window:maximized", mainWindow.isMaximized());
+  };
+  mainWindow.on("maximize", sendMaximized);
+  mainWindow.on("unmaximize", sendMaximized);
 
   mainWindow.webContents.on("did-fail-load", (_e, code, desc, url) => {
     console.error("did-fail-load", code, desc, url);
@@ -113,11 +125,31 @@ function lspStatusPayload() {
 }
 
 function registerIpc(): void {
+  ipcMain.handle("window:minimize", () => {
+    mainWindow?.minimize();
+  });
+  ipcMain.handle("window:maximize", () => {
+    if (!mainWindow) return false;
+    if (mainWindow.isMaximized()) mainWindow.unmaximize();
+    else mainWindow.maximize();
+    return mainWindow.isMaximized();
+  });
+  ipcMain.handle("window:close", () => {
+    mainWindow?.close();
+  });
+  ipcMain.handle("window:isMaximized", () => mainWindow?.isMaximized() ?? false);
+  ipcMain.handle("window:toggleDevTools", () => {
+    mainWindow?.webContents.toggleDevTools();
+  });
+  ipcMain.handle("window:reload", () => {
+    mainWindow?.webContents.reload();
+  });
+
   ipcMain.handle("settings:get", () => loadSettings());
   ipcMain.handle("settings:set", (_e, patch: Partial<AppSettings>) => {
     settings = saveSettings(patch);
     pluginHost?.updateSettings(settings);
-    if (patch.extensionSettings || patch.pluginsEnabled) {
+    if (patch.pluginsEnabled) {
       void restartLanguageServers();
     }
     return settings;
@@ -161,11 +193,22 @@ function registerIpc(): void {
   ipcMain.handle(
     "fs:writeFile",
     (_e, filePath: string, content: string, encoding?: string) => {
+      fileWatcher?.ignore(filePath);
       writeTextFile(filePath, content, encoding || "utf-8");
       return true;
     },
   );
   ipcMain.handle("fs:exists", (_e, filePath: string) => fileExists(filePath));
+  ipcMain.handle("fs:watch", (_e, filePath: string) => {
+    fileWatcher?.watchFile(filePath);
+  });
+  ipcMain.handle("fs:unwatch", (_e, filePath: string) => {
+    fileWatcher?.unwatchFile(filePath);
+  });
+  ipcMain.handle("fs:watchWorkspace", (_e, root: string) => {
+    if (root) fileWatcher?.watchWorkspace(root);
+    else fileWatcher?.unwatchWorkspace();
+  });
 
   ipcMain.handle("term:list", () => terminalHost?.list() ?? []);
   ipcMain.handle("term:create", (_e, kind?: ShellKind) => {
@@ -183,29 +226,9 @@ function registerIpc(): void {
     terminalHost?.kill(id);
   });
 
-  ipcMain.handle(
-    "compare:run",
-    async (
-      _e,
-      dirA: string,
-      dirB: string,
-      opts: { ignoreWhitespace?: boolean } = {},
-    ) => {
-      const s = loadSettings();
-      if (s.pluginsEnabled?.compare === false) {
-        return { error: "Compare 扩展已禁用", changes: [] };
-      }
-      return runCompare(dirA, dirB, {
-        pythonPath: s.pythonPath,
-        compareRoot: s.compareRoot,
-        ignoreWhitespace: !!opts.ignoreWhitespace,
-      });
-    },
-  );
-
   ipcMain.handle("lsp:request", async (_e, method: string, params: unknown) => {
     const session = pickServer(params);
-    if (!session?.ready) throw new Error("没有可用的语言服务器（请安装并启用扩展，如 clangd）");
+    if (!session?.ready) throw new Error("没有可用的语言服务器");
     return session.request(method, params);
   });
 
@@ -219,46 +242,6 @@ function registerIpc(): void {
   ipcMain.handle("lsp:restart", async () => {
     await restartLanguageServers();
     return lspStatusPayload();
-  });
-
-  ipcMain.handle("plugins:list", () => pluginHost?.list() ?? []);
-  ipcMain.handle("plugins:setEnabled", (_e, id: string, enabled: boolean) => {
-    const s = loadSettings();
-    const map = { ...(s.pluginsEnabled || {}) };
-    map[id] = enabled;
-    settings = saveSettings({ pluginsEnabled: map });
-    pluginHost?.updateSettings(settings);
-    void restartLanguageServers();
-    return pluginHost?.list() ?? [];
-  });
-
-  ipcMain.handle("plugins:installFolder", async () => {
-    const res = await dialog.showOpenDialog(mainWindow!, {
-      properties: ["openDirectory"],
-      title: "选择扩展目录（含 package.json）",
-    });
-    if (res.canceled || !res.filePaths[0]) return null;
-    try {
-      const info = pluginHost!.installFromFolder(res.filePaths[0]);
-      settings = saveSettings({
-        pluginsEnabled: { ...loadSettings().pluginsEnabled, [info.id]: true },
-      });
-      pluginHost?.updateSettings(settings);
-      await restartLanguageServers();
-      return pluginHost?.list() ?? [];
-    } catch (err) {
-      throw new Error(err instanceof Error ? err.message : String(err));
-    }
-  });
-
-  ipcMain.handle("plugins:uninstall", async (_e, id: string) => {
-    pluginHost?.uninstall(id);
-    const map = { ...loadSettings().pluginsEnabled };
-    delete map[id];
-    settings = saveSettings({ pluginsEnabled: map });
-    pluginHost?.updateSettings(settings);
-    await restartLanguageServers();
-    return pluginHost?.list() ?? [];
   });
 }
 
@@ -404,15 +387,11 @@ function buildMenu(): void {
       ],
     },
     {
-      label: "扩展",
+      label: "帮助",
       submenu: [
         {
-          label: "从文件夹安装扩展…",
-          click: () => mainWindow?.webContents.send("menu:installExtension"),
-        },
-        {
-          label: "重启语言服务器",
-          click: () => void restartLanguageServers(),
+          label: "关于 Easycode",
+          click: () => mainWindow?.webContents.send("menu:about"),
         },
       ],
     },
@@ -436,6 +415,19 @@ app.whenReady().then(async () => {
       }
     }) || extCandidates[0];
   pluginHost = new PluginHost(extRoot, settings);
+  fileWatcher = new FileWatcher((event) => {
+    if (!mainWindow) return;
+    if (event.type === "change") {
+      mainWindow.webContents.send("fs:changed", { path: event.path });
+    } else if (event.type === "unlink") {
+      mainWindow.webContents.send("fs:deleted", { path: event.path });
+    } else if (event.type === "tree") {
+      mainWindow.webContents.send("fs:tree", {
+        path: event.path,
+        root: event.root,
+      });
+    }
+  });
   terminalHost = new TerminalHost({
     onData: (id, data) => {
       mainWindow?.webContents.send("term:data", { id, data });
@@ -460,5 +452,6 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => {
   void stopAllServers();
   terminalHost?.dispose();
+  fileWatcher?.dispose();
   if (process.platform !== "darwin") app.quit();
 });
