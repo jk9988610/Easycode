@@ -48,6 +48,31 @@ export class TerminalPanel {
 
   async open(kind: ShellKind): Promise<void> {
     const info = await window.easycode.termCreate(kind);
+    this.mountSession(info);
+  }
+
+  /** Attach UI for a terminal already created in the main process (extension host). */
+  attachExisting(info: { id: string; kind: ShellKind; title: string }): void {
+    if (this.tabs.some((t) => t.id === info.id)) {
+      this.activate(info.id);
+      return;
+    }
+    this.mountSession(info);
+  }
+
+  removeUiOnly(id: string): void {
+    const idx = this.tabs.findIndex((t) => t.id === id);
+    if (idx < 0) return;
+    const [t] = this.tabs.splice(idx, 1);
+    t.term.dispose();
+    t.el.remove();
+    if (this.activeId === id) {
+      this.activeId = this.tabs[Math.max(0, idx - 1)]?.id ?? null;
+      if (this.activeId) this.activate(this.activeId);
+    }
+  }
+
+  private mountSession(info: { id: string; kind: ShellKind; title: string }): void {
     const el = document.createElement("div");
     el.className = "term-view";
     el.style.display = "none";

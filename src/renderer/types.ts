@@ -17,6 +17,22 @@ export interface DirEntry {
   isDirectory: boolean;
 }
 
+export interface StatusBarItemDto {
+  id: string;
+  alignment: "left" | "right";
+  priority: number;
+  text: string;
+  tooltip: string;
+  command?: string;
+  visible: boolean;
+}
+
+export interface OutputChannelDto {
+  id: string;
+  name: string;
+  content: string;
+}
+
 export interface AppSettings {
   lastWorkspace: string;
   windowWidth: number;
@@ -38,6 +54,18 @@ export interface AppSettings {
   defaultTerminal: ShellKind;
   pluginsEnabled: Record<string, boolean>;
   extensionSettings: Record<string, Record<string, unknown>>;
+  configuration: Record<string, unknown>;
+}
+
+export interface PluginInfo {
+  id: string;
+  name: string;
+  description?: string;
+  version?: string;
+  publisher?: string;
+  enabled: boolean;
+  path: string;
+  installed: boolean;
 }
 
 export interface EditorTab {
@@ -81,6 +109,36 @@ export interface EasycodeApi {
     workspace: string | null;
   }>;
   lspRestart: () => Promise<{ running: boolean; servers?: string[] }>;
+  listPlugins: () => Promise<PluginInfo[]>;
+  setPluginEnabled: (id: string, enabled: boolean) => Promise<PluginInfo[]>;
+  installPluginFolder: () => Promise<PluginInfo | null>;
+  installPluginVsix: () => Promise<PluginInfo | null>;
+  uninstallPlugin: (id: string) => Promise<PluginInfo[]>;
+  executeExtensionCommand: (
+    command: string,
+    ...args: unknown[]
+  ) => Promise<unknown>;
+  listExtensionCommands: () => Promise<string[]>;
+  onExtStatusBar: (cb: (items: StatusBarItemDto[]) => void) => () => void;
+  onExtOutput: (
+    cb: (data: {
+      channels: OutputChannelDto[];
+      activeId: string | null;
+    }) => void,
+  ) => () => void;
+  onExtMessage: (
+    cb: (data: { type: "info" | "warn" | "error"; text: string }) => void,
+  ) => () => void;
+  onExtTerminal: (
+    cb: (data: {
+      action: "created" | "show" | "disposed";
+      id: string;
+      kind?: ShellKind;
+      title?: string;
+    }) => void,
+  ) => () => void;
+  onExtShowPanel: (cb: (view: string) => void) => () => void;
+  onExtFocusEditor: (cb: () => void) => () => void;
   termList: () => Promise<{ id: string; kind: ShellKind; title: string }[]>;
   termCreate: (
     kind?: ShellKind,

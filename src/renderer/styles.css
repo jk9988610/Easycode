@@ -1224,6 +1224,54 @@ button.status-item:hover {
   font-size: 12px;
 }
 
+.ext-output {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.ext-output-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.ext-output-tabs button {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+
+.ext-output-tabs button.active,
+.ext-output-tabs button:hover {
+  color: var(--ink);
+  background: #2a323a;
+  border-color: transparent;
+}
+
+.ext-output-body {
+  margin: 0;
+  padding: 8px 10px;
+  flex: 1;
+  overflow: auto;
+  font-family: Cascadia Mono, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--ink);
+}
+
+.status-item.ext-status {
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
 .problems-list {
   display: flex;
   flex-direction: column;
@@ -1255,6 +1303,81 @@ button.status-item:hover {
 
 .explorer-section {
   margin-bottom: 10px;
+}
+
+.ext-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.ext-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ext-toolbar button {
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.ext-list {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ext-item {
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #1e242a;
+}
+
+.ext-item-name {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.ext-item-id,
+.ext-item-meta {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.ext-item-desc {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 6px;
+  line-height: 1.4;
+}
+
+.ext-item-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.ext-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.ext-error {
+  color: #f48771;
 }
 
 .section-title {

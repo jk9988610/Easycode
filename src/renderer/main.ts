@@ -13,13 +13,13 @@ import {
   accountPlaceholderHtml,
   chatPlaceholderHtml,
   debugPlaceholderHtml,
-  extensionsPlaceholderHtml,
   loginPopoverHtml,
   outputPlaceholderHtml,
   scmPlaceholderHtml,
   searchPlaceholderHtml,
   tasksPlaceholderHtml,
 } from "./placeholderViews";
+import { extensionsPanelHtml } from "./extensionsView";
 import type {
   ActivityId,
   AppSettings,
@@ -59,6 +59,10 @@ class App {
   private settingsCategory = "common";
   private settingsFilter = "";
   private panelResizeCleanup: (() => void) | null = null;
+  private extStatusItems: import("./types").StatusBarItemDto[] = [];
+  private extOutputChannels: import("./types").OutputChannelDto[] = [];
+  private extActiveOutputId: string | null = null;
+  private extCommandIds: string[] = [];
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -72,6 +76,7 @@ class App {
     this.settings = await window.easycode.getSettings();
     if (!this.settings.panelView) this.settings.panelView = "terminal";
     if (!this.settings.rightView) this.settings.rightView = "info";
+    if (!this.settings.configuration) this.settings.configuration = {};
     this.workspace = this.settings.lastWorkspace || "";
     const st = await window.easycode.lspStatus();
     this.applyLspStatus(st);
@@ -108,6 +113,53 @@ class App {
     window.easycode.onFileChanged((data) => void this.handleExternalFileChange(data.path));
     window.easycode.onFileDeleted((data) => void this.handleExternalFileDeleted(data.path));
     window.easycode.onTreeChanged((data) => void this.handleTreeChanged(data.path));
+
+    window.easycode.onExtStatusBar((items) => {
+      this.extStatusItems = items;
+      this.renderStatus();
+      void window.easycode.listExtensionCommands().then((ids) => {
+        this.extCommandIds = ids;
+      });
+    });
+    window.easycode.onExtOutput((data) => {
+      this.extOutputChannels = data.channels;
+      this.extActiveOutputId = data.activeId;
+      if (this.settings.showPanel && this.settings.panelView === "output") {
+        this.renderBottomPanel();
+      }
+    });
+    window.easycode.onExtMessage((data) => {
+      this.showToast(data.text, data.type === "error");
+    });
+    window.easycode.onExtShowPanel((view) => {
+      if (view === "output" || view === "terminal" || view === "problems" || view === "debug") {
+        void this.setPanelView(view);
+      }
+    });
+    window.easycode.onExtFocusEditor(() => {
+      this.editor?.focus();
+    });
+    window.easycode.onExtTerminal((ev) => {
+      if (ev.action === "created" && ev.kind && ev.title) {
+        void this.ensureTerminalPanel();
+        this.terminalPanel?.attachExisting({
+          id: ev.id,
+          kind: ev.kind,
+          title: ev.title,
+        });
+        this.renderPanelChrome();
+      } else if (ev.action === "show") {
+        void this.setPanelView("terminal");
+        this.terminalPanel?.activate(ev.id);
+        this.renderPanelChrome();
+      } else if (ev.action === "disposed") {
+        this.terminalPanel?.removeUiOnly(ev.id);
+        this.renderPanelChrome();
+      }
+    });
+    void window.easycode.listExtensionCommands().then((ids) => {
+      this.extCommandIds = ids;
+    });
 
     window.addEventListener("keydown", (e) => this.onGlobalKey(e));
     window.addEventListener("resize", () => this.terminalPanel?.layout());
@@ -596,6 +648,11 @@ class App {
         this.render();
       }),
       withKeys("settings", "打开设置", "Ctrl+,", () => this.openSettingsModal()),
+      ...this.extCommandIds.map((id) =>
+        withKeys(`ext:${id}`, id, undefined, () => {
+          void window.easycode.executeExtensionCommand(id);
+        }),
+      ),
     ];
   }
 
@@ -1077,7 +1134,7 @@ class App {
     if (this.activity === "explorer") this.renderExplorer(el);
     else if (this.activity === "search") el.innerHTML = searchPlaceholderHtml();
     else if (this.activity === "scm") el.innerHTML = scmPlaceholderHtml();
-    else if (this.activity === "extensions") el.innerHTML = extensionsPlaceholderHtml();
+    else if (this.activity === "extensions") void this.renderExtensions(el);
     else if (this.activity === "account") el.innerHTML = accountPlaceholderHtml();
     else if (this.activity === "tasks") el.innerHTML = tasksPlaceholderHtml();
     else if (this.activity === "settings") {
@@ -1086,6 +1143,79 @@ class App {
         this.openSettingsModal(),
       );
     }
+  }
+
+  private async renderExtensions(el: HTMLElement): Promise<void> {
+    el.innerHTML = `<div class="placeholder-pane"><p class="placeholder-hint">加载中…</p></div>`;
+    try {
+      const plugins = await window.easycode.listPlugins();
+      if (this.activity !== "extensions") return;
+      el.innerHTML = extensionsPanelHtml(plugins);
+      this.bindExtensionsPanel(el);
+    } catch (err) {
+      if (this.activity !== "extensions") return;
+      const msg = err instanceof Error ? err.message : String(err);
+      el.innerHTML = extensionsPanelHtml([], msg);
+      this.bindExtensionsPanel(el);
+    }
+  }
+
+  private bindExtensionsPanel(el: HTMLElement): void {
+    const refresh = () => {
+      if (this.activity === "extensions") void this.renderExtensions(el);
+    };
+    el.querySelector("[data-ext-install-vsix]")?.addEventListener("click", () => {
+      void (async () => {
+        try {
+          await window.easycode.installPluginVsix();
+          refresh();
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          window.alert(`安装失败：${msg}`);
+        }
+      })();
+    });
+    el.querySelector("[data-ext-install-folder]")?.addEventListener("click", () => {
+      void (async () => {
+        try {
+          await window.easycode.installPluginFolder();
+          refresh();
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          window.alert(`安装失败：${msg}`);
+        }
+      })();
+    });
+    el.querySelectorAll(".ext-item").forEach((node) => {
+      const item = node as HTMLElement;
+      const id = item.dataset.id;
+      if (!id) return;
+      item.querySelector("[data-ext-toggle]")?.addEventListener("change", (ev) => {
+        const checked = (ev.target as HTMLInputElement).checked;
+        void (async () => {
+          try {
+            await window.easycode.setPluginEnabled(id, checked);
+            refresh();
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            window.alert(`更新失败：${msg}`);
+            refresh();
+          }
+        })();
+      });
+      item.querySelector("[data-ext-uninstall]")?.addEventListener("click", () => {
+        if (!window.confirm(`卸载扩展 ${id}？`)) return;
+        void (async () => {
+          try {
+            await window.easycode.uninstallPlugin(id);
+            refresh();
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            window.alert(`卸载失败：${msg}`);
+          }
+        })();
+      });
+    });
   }
 
   private renderExplorer(el: HTMLElement): void {
@@ -1586,7 +1716,34 @@ class App {
       renderProblemsList(el, (item) => void this.openProblem(item));
     } else if (activeView === "output") {
       const el = this.root.querySelector("#panel-output") as HTMLElement;
-      el.innerHTML = outputPlaceholderHtml();
+      if (this.extOutputChannels.length === 0) {
+        el.innerHTML = outputPlaceholderHtml();
+      } else {
+        const active =
+          this.extOutputChannels.find((c) => c.id === this.extActiveOutputId) ||
+          this.extOutputChannels[0];
+        el.innerHTML = `<div class="ext-output">
+          <div class="ext-output-tabs">
+            ${this.extOutputChannels
+              .map(
+                (c) =>
+                  `<button type="button" class="${
+                    c.id === active.id ? "active" : ""
+                  }" data-out="${escapeAttr(c.id)}">${escapeHtml(c.name)}</button>`,
+              )
+              .join("")}
+          </div>
+          <pre class="ext-output-body">${escapeHtml(active.content || "")}</pre>
+        </div>`;
+        el.querySelectorAll<HTMLButtonElement>("[data-out]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            this.extActiveOutputId = btn.getAttribute("data-out");
+            this.renderBottomPanel();
+          });
+        });
+        const body = el.querySelector(".ext-output-body");
+        if (body) body.scrollTop = body.scrollHeight;
+      }
     } else if (activeView === "debug") {
       const el = this.root.querySelector("#panel-debug") as HTMLElement;
       el.innerHTML = debugPlaceholderHtml();
@@ -1747,18 +1904,42 @@ class App {
             this.lspServers.join(", "),
           )}</button>`
         : "";
+    const leftExt = this.extStatusItems
+      .filter((i) => i.alignment === "left")
+      .map(
+        (i) =>
+          `<button type="button" class="status-item ext-status" data-ext-cmd="${escapeAttr(
+            i.command || "",
+          )}" title="${escapeAttr(i.tooltip || i.text)}">${escapeHtml(
+            formatCodicons(i.text),
+          )}</button>`,
+      )
+      .join("");
+    const rightExt = this.extStatusItems
+      .filter((i) => i.alignment === "right")
+      .map(
+        (i) =>
+          `<button type="button" class="status-item ext-status" data-ext-cmd="${escapeAttr(
+            i.command || "",
+          )}" title="${escapeAttr(i.tooltip || i.text)}">${escapeHtml(
+            formatCodicons(i.text),
+          )}</button>`,
+      )
+      .join("");
     el.innerHTML = `
       <div class="status-left">
         <button type="button" class="status-item problems-count" data-act="problems" title="问题">
           <span class="err">● ${errors}</span>
           <span class="warn">● ${warnings}</span>
         </button>
+        ${leftExt}
         ${lsp}
         <span class="status-item path" title="${escapeAttr(pathLabel)}">${escapeHtml(
           tab ? tab.name : pathLabel,
         )}</span>
       </div>
       <div class="status-right">
+        ${rightExt}
         <span class="status-item">${escapeHtml(this.cursorLabel)}</span>
         <span class="status-item">${escapeHtml(tab?.language || "plaintext")}</span>
         <button type="button" class="status-item" data-act="encoding">${escapeHtml(
@@ -1771,6 +1952,12 @@ class App {
     el.querySelector('[data-act="problems"]')?.addEventListener("click", () =>
       void this.setPanelView("problems"),
     );
+    el.querySelectorAll<HTMLButtonElement>("[data-ext-cmd]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const cmd = btn.getAttribute("data-ext-cmd");
+        if (cmd) void window.easycode.executeExtensionCommand(cmd);
+      });
+    });
     el.querySelector('[data-act="encoding"]')?.addEventListener("click", () => {
       const t = this.activeTab();
       if (!t) return;
@@ -1866,6 +2053,20 @@ function escapeHtml(s: string): string {
 
 function escapeAttr(s: string): string {
   return escapeHtml(s);
+}
+
+const CODICON_MAP: Record<string, string> = {
+  tools: "🔨",
+  zap: "⚡",
+  "radio-tower": "📡",
+  "run-all": "▶",
+  "file-code": "📑",
+  check: "✓",
+  "sync~spin": "⟳",
+};
+
+function formatCodicons(text: string): string {
+  return text.replace(/\$\(([^)]+)\)/g, (_, name: string) => CODICON_MAP[name] || "");
 }
 
 const appRoot = document.getElementById("app");

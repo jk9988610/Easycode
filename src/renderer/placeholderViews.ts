@@ -17,14 +17,6 @@ export function scmPlaceholderHtml(): string {
     </div>`;
 }
 
-export function extensionsPlaceholderHtml(): string {
-  return `
-    <div class="placeholder-pane">
-      <div class="placeholder-title">扩展</div>
-      <p class="placeholder-hint">扩展市场即将推出。Easycode 不预装第三方语言服务或工具扩展。</p>
-    </div>`;
-}
-
 export function accountPlaceholderHtml(): string {
   return `
     <div class="placeholder-pane">

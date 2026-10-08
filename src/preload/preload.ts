@@ -54,6 +54,99 @@ const api = {
     ipcRenderer.invoke("lsp:notify", method, params),
   lspStatus: () => ipcRenderer.invoke("lsp:status"),
   lspRestart: () => ipcRenderer.invoke("lsp:restart"),
+  listPlugins: () => ipcRenderer.invoke("plugins:list"),
+  setPluginEnabled: (id: string, enabled: boolean) =>
+    ipcRenderer.invoke("plugins:setEnabled", id, enabled),
+  installPluginFolder: () => ipcRenderer.invoke("plugins:installFolder"),
+  installPluginVsix: () => ipcRenderer.invoke("plugins:installVsix"),
+  uninstallPlugin: (id: string) => ipcRenderer.invoke("plugins:uninstall", id),
+  executeExtensionCommand: (command: string, ...args: unknown[]) =>
+    ipcRenderer.invoke("ext:executeCommand", command, ...args),
+  listExtensionCommands: () => ipcRenderer.invoke("ext:listCommands"),
+  onExtStatusBar: (
+    cb: (
+      items: {
+        id: string;
+        alignment: "left" | "right";
+        priority: number;
+        text: string;
+        tooltip: string;
+        command?: string;
+        visible: boolean;
+      }[],
+    ) => void,
+  ) => {
+    const listener = (
+      _: unknown,
+      items: {
+        id: string;
+        alignment: "left" | "right";
+        priority: number;
+        text: string;
+        tooltip: string;
+        command?: string;
+        visible: boolean;
+      }[],
+    ) => cb(items);
+    ipcRenderer.on("ext:statusBar", listener);
+    return () => ipcRenderer.removeListener("ext:statusBar", listener);
+  },
+  onExtOutput: (
+    cb: (data: {
+      channels: { id: string; name: string; content: string }[];
+      activeId: string | null;
+    }) => void,
+  ) => {
+    const listener = (
+      _: unknown,
+      data: {
+        channels: { id: string; name: string; content: string }[];
+        activeId: string | null;
+      },
+    ) => cb(data);
+    ipcRenderer.on("ext:output", listener);
+    return () => ipcRenderer.removeListener("ext:output", listener);
+  },
+  onExtMessage: (
+    cb: (data: { type: "info" | "warn" | "error"; text: string }) => void,
+  ) => {
+    const listener = (
+      _: unknown,
+      data: { type: "info" | "warn" | "error"; text: string },
+    ) => cb(data);
+    ipcRenderer.on("ext:message", listener);
+    return () => ipcRenderer.removeListener("ext:message", listener);
+  },
+  onExtTerminal: (
+    cb: (data: {
+      action: "created" | "show" | "disposed";
+      id: string;
+      kind?: ShellKind;
+      title?: string;
+    }) => void,
+  ) => {
+    const listener = (
+      _: unknown,
+      data: {
+        action: "created" | "show" | "disposed";
+        id: string;
+        kind?: ShellKind;
+        title?: string;
+      },
+    ) => cb(data);
+    ipcRenderer.on("ext:terminal", listener);
+    return () => ipcRenderer.removeListener("ext:terminal", listener);
+  },
+  onExtShowPanel: (cb: (view: string) => void) => {
+    const listener = (_: unknown, view: string) => cb(view);
+    ipcRenderer.on("ext:showPanel", listener);
+    return () => ipcRenderer.removeListener("ext:showPanel", listener);
+  },
+  onExtFocusEditor: (cb: () => void) => {
+    const listener = () => cb();
+    ipcRenderer.on("ext:focusEditor", listener);
+    return () => ipcRenderer.removeListener("ext:focusEditor", listener);
+  },
   termList: () => ipcRenderer.invoke("term:list"),
   termCreate: (kind?: ShellKind) => ipcRenderer.invoke("term:create", kind),
   termWrite: (id: string, data: string) =>

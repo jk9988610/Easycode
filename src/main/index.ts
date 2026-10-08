@@ -8,11 +8,13 @@ import { LanguageServerSession } from "./languageServer";
 import { PluginHost } from "./plugins";
 import { TerminalHost, type ShellKind } from "./terminal";
 import { FileWatcher } from "./fileWatcher";
+import { ExtensionHost, createExtensionBridge } from "./extensionHost";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 let mainWindow: BrowserWindow | null = null;
 let pluginHost: PluginHost | null = null;
+let extensionHost: ExtensionHost | null = null;
 let terminalHost: TerminalHost | null = null;
 let fileWatcher: FileWatcher | null = null;
 let settings: AppSettings = loadSettingsSafe();
@@ -43,6 +45,7 @@ function loadSettingsSafe(): AppSettings {
       defaultTerminal: "powershell",
       pluginsEnabled: {},
       extensionSettings: {},
+      configuration: {},
     };
   }
 }
@@ -81,6 +84,10 @@ function createWindow(): void {
 
   mainWindow.once("ready-to-show", () => {
     mainWindow?.show();
+  });
+
+  mainWindow.webContents.on("did-finish-load", () => {
+    void reloadExtensions();
   });
 
   const sendMaximized = () => {
@@ -147,10 +154,20 @@ function registerIpc(): void {
 
   ipcMain.handle("settings:get", () => loadSettings());
   ipcMain.handle("settings:set", (_e, patch: Partial<AppSettings>) => {
+    const prevConfig = { ...settings.configuration };
     settings = saveSettings(patch);
     pluginHost?.updateSettings(settings);
     if (patch.pluginsEnabled) {
       void restartLanguageServers();
+      void reloadExtensions();
+    }
+    if (patch.configuration) {
+      const keys = Object.keys(patch.configuration);
+      extensionHost?.getApiFactory().fireConfigurationChange(keys);
+      // also fire keys that changed vs previous
+      for (const k of Object.keys(prevConfig)) {
+        if (!(k in (patch.configuration || {}))) keys.push(k);
+      }
     }
     return settings;
   });
@@ -164,6 +181,7 @@ function registerIpc(): void {
     saveSettings({ lastWorkspace: folder });
     settings = loadSettings();
     await restartLanguageServers(folder);
+    extensionHost?.fireWorkspaceChange();
     return folder;
   });
 
@@ -211,10 +229,14 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("term:list", () => terminalHost?.list() ?? []);
-  ipcMain.handle("term:create", (_e, kind?: ShellKind) => {
+  ipcMain.handle("term:create", (_e, kind?: ShellKind, opts?: { cwd?: string; title?: string }) => {
     const s = loadSettings();
     const shell = kind || s.defaultTerminal || "powershell";
-    return terminalHost!.create(shell, s.lastWorkspace || undefined);
+    return terminalHost!.create(
+      shell,
+      opts?.cwd || s.lastWorkspace || undefined,
+      opts?.title,
+    );
   });
   ipcMain.handle("term:write", (_e, id: string, data: string) => {
     terminalHost?.write(id, data);
@@ -243,6 +265,48 @@ function registerIpc(): void {
     await restartLanguageServers();
     return lspStatusPayload();
   });
+
+  ipcMain.handle("plugins:list", () => pluginHost?.list() ?? []);
+  ipcMain.handle("plugins:setEnabled", async (_e, id: string, enabled: boolean) => {
+    settings = saveSettings({ pluginsEnabled: { [id]: enabled } });
+    pluginHost?.updateSettings(settings);
+    await restartLanguageServers();
+    await reloadExtensions();
+    return pluginHost?.list() ?? [];
+  });
+  ipcMain.handle("plugins:installFolder", async () => {
+    const res = await dialog.showOpenDialog(mainWindow!, {
+      title: "选择扩展文件夹",
+      properties: ["openDirectory"],
+    });
+    if (res.canceled || !res.filePaths[0]) return null;
+    const info = pluginHost!.installFromFolder(res.filePaths[0]);
+    await restartLanguageServers();
+    await reloadExtensions();
+    return info;
+  });
+  ipcMain.handle("plugins:installVsix", async () => {
+    const res = await dialog.showOpenDialog(mainWindow!, {
+      title: "选择 VSIX 文件",
+      properties: ["openFile"],
+      filters: [{ name: "VSIX", extensions: ["vsix"] }],
+    });
+    if (res.canceled || !res.filePaths[0]) return null;
+    const info = pluginHost!.installFromVsix(res.filePaths[0]);
+    await restartLanguageServers();
+    await reloadExtensions();
+    return info;
+  });
+  ipcMain.handle("plugins:uninstall", async (_e, id: string) => {
+    pluginHost?.uninstall(id);
+    await restartLanguageServers();
+    await reloadExtensions();
+    return pluginHost?.list() ?? [];
+  });
+  ipcMain.handle("ext:executeCommand", async (_e, command: string, ...args: unknown[]) => {
+    return extensionHost?.executeCommand(command, ...args);
+  });
+  ipcMain.handle("ext:listCommands", () => extensionHost?.listRegisteredCommands() ?? []);
 }
 
 /** Prefer server matching textDocument language if we can infer; else first ready. */
@@ -272,6 +336,13 @@ async function stopAllServers(): Promise<void> {
   const list = [...servers.values()];
   servers.clear();
   await Promise.all(list.map((s) => s.stop().catch(() => undefined)));
+}
+
+async function reloadExtensions(): Promise<void> {
+  if (!extensionHost || !pluginHost) return;
+  settings = loadSettings();
+  pluginHost.updateSettings(settings);
+  await extensionHost.reload(pluginHost.list());
 }
 
 async function restartLanguageServers(workspace?: string): Promise<void> {
@@ -402,18 +473,8 @@ function buildMenu(): void {
 app.whenReady().then(async () => {
   app.setName("Easycode");
   settings = loadSettings();
-  const extCandidates = [
-    path.join(process.cwd(), "extensions"),
-    path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../extensions"),
-  ];
-  const extRoot =
-    extCandidates.find((p) => {
-      try {
-        return fs.existsSync(p);
-      } catch {
-        return false;
-      }
-    }) || extCandidates[0];
+  const extRoot = path.join(app.getPath("userData"), "extensions");
+  fs.mkdirSync(extRoot, { recursive: true });
   pluginHost = new PluginHost(extRoot, settings);
   fileWatcher = new FileWatcher((event) => {
     if (!mainWindow) return;
@@ -436,6 +497,37 @@ app.whenReady().then(async () => {
       mainWindow?.webContents.send("term:exit", { id, code });
     },
   });
+  extensionHost = new ExtensionHost(
+    createExtensionBridge({
+      getWorkspace: () => settings.lastWorkspace || null,
+      getUserConfig: (key) => settings.configuration?.[key],
+      getConfigDefaults: () => extensionHost?.getConfigurationDefaults() || {},
+      terminalHost: () => terminalHost,
+      defaultShell: () => settings.defaultTerminal || "powershell",
+      send: (channel, payload) => {
+        mainWindow?.webContents.send(channel, payload);
+      },
+      onBuiltin: async (command, args) => {
+        if (command === "easycode.showOutput") {
+          mainWindow?.webContents.send("ext:showPanel", "output");
+          return;
+        }
+        if (command === "easycode.showTerminal") {
+          mainWindow?.webContents.send("ext:showPanel", "terminal");
+          return;
+        }
+        if (command === "workbench.action.focusActiveEditorGroup") {
+          mainWindow?.webContents.send("ext:focusEditor");
+          return;
+        }
+        if (command === "clangd.restart" || command === "easycode.lspRestart") {
+          await restartLanguageServers();
+          return lspStatusPayload();
+        }
+        console.warn("[ext] unknown command", command, args);
+      },
+    }),
+  );
   registerIpc();
   buildMenu();
   createWindow();
@@ -450,6 +542,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
+  void extensionHost?.deactivateAll();
   void stopAllServers();
   terminalHost?.dispose();
   fileWatcher?.dispose();

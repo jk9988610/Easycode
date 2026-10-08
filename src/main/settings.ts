@@ -28,6 +28,8 @@ export interface AppSettings {
   /** Reserved for future extension-contributed language servers. */
   pluginsEnabled: Record<string, boolean>;
   extensionSettings: Record<string, Record<string, unknown>>;
+  /** VS Code-style configuration keys, e.g. cursorKeilBar.uv4Path */
+  configuration: Record<string, unknown>;
 }
 
 const DEFAULTS: AppSettings = {
@@ -49,6 +51,7 @@ const DEFAULTS: AppSettings = {
   defaultTerminal: "powershell",
   pluginsEnabled: {},
   extensionSettings: {},
+  configuration: {},
 };
 
 function settingsPath(): string {
@@ -64,6 +67,7 @@ export function loadSettings(): AppSettings {
     ...DEFAULTS,
     pluginsEnabled: { ...DEFAULTS.pluginsEnabled },
     extensionSettings: { ...DEFAULTS.extensionSettings },
+    configuration: { ...DEFAULTS.configuration },
   };
   try {
     const p = settingsPath();
@@ -72,6 +76,7 @@ export function loadSettings(): AppSettings {
     Object.assign(data, raw);
     data.pluginsEnabled = { ...(raw.pluginsEnabled || {}) };
     data.extensionSettings = { ...(raw.extensionSettings || {}) };
+    data.configuration = { ...(raw.configuration || {}) };
     if (!data.panelView) data.panelView = DEFAULTS.panelView;
     if (!data.rightView) data.rightView = DEFAULTS.rightView;
   } catch {
@@ -92,6 +97,10 @@ export function saveSettings(patch: Partial<AppSettings>): AppSettings {
     extensionSettings: {
       ...current.extensionSettings,
       ...(patch.extensionSettings || {}),
+    },
+    configuration: {
+      ...current.configuration,
+      ...(patch.configuration || {}),
     },
   };
   try {

@@ -44,7 +44,7 @@ export class TerminalHost {
     }));
   }
 
-  create(kind: ShellKind, cwd?: string): TerminalSessionInfo {
+  create(kind: ShellKind, cwd?: string, titleOverride?: string): TerminalSessionInfo {
     const id = `term-${this.seq++}`;
     const workDir =
       cwd && fs.existsSync(cwd) ? cwd : process.env.USERPROFILE || os.homedir();
@@ -59,7 +59,12 @@ export class TerminalHost {
       stdio: ["pipe", "pipe", "pipe"],
     });
 
-    const session: Session = { id, kind, title, proc };
+    const session: Session = {
+      id,
+      kind,
+      title: titleOverride?.trim() || title,
+      proc,
+    };
     this.sessions.set(id, session);
 
     const push = (buf: Buffer) => {
