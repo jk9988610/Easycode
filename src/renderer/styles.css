@@ -22,6 +22,34 @@
   box-sizing: border-box;
 }
 
+/* Modern thin scrollbars (replaces the default retro/3D scrollbars) */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(139, 154, 166, 0.28);
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(139, 154, 166, 0.5);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:active {
+  background: rgba(61, 143, 160, 0.65);
+  background-clip: padding-box;
+}
+
 html,
 body,
 #app {
@@ -726,11 +754,12 @@ select:focus {
 
 .tabs {
   display: flex;
+  flex-wrap: wrap;
   align-items: stretch;
-  height: var(--tab-h);
+  min-height: var(--tab-h);
   background: #151a1f;
   border-bottom: 1px solid var(--line);
-  overflow-x: auto;
+  overflow: hidden;
 }
 
 .tab {
@@ -743,8 +772,19 @@ select:focus {
   background: transparent;
   color: var(--muted);
   border-radius: 0;
+  height: var(--tab-h);
+  flex: 0 1 auto;
+  min-width: 100px;
   max-width: 200px;
+  overflow: hidden;
   position: relative;
+}
+
+.tab .label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tab.active {

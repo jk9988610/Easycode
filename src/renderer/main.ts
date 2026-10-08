@@ -1549,7 +1549,7 @@ class App {
       <button type="button" class="tab ${t.id === this.activeTabId ? "active" : ""}" data-id="${escapeAttr(
         t.id,
       )}">
-        <span class="${t.dirty ? "dirty" : ""}">${escapeHtml(t.name)}${t.dirty ? " ●" : ""}</span>
+        <span class="label ${t.dirty ? "dirty" : ""}">${escapeHtml(t.name)}${t.dirty ? " ●" : ""}</span>
         <span class="close" data-close="${escapeAttr(t.id)}">×</span>
       </button>`,
       )
