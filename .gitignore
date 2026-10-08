@@ -3,3 +3,8 @@ dist/
 dist-electron/
 *.log
 .DS_Store
+
+# Python (agent-core)
+__pycache__/
+*.pyc
+*.bak
