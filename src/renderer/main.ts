@@ -43,6 +43,7 @@ class App {
   });
   private workspace = "";
   private tabs: EditorTab[] = [];
+  private openTabsTimer: number | null = null;
   private gitFileStatus = new Map<string, string>();
   private editorDecorations: string[] = [];
   private activeTabId: string | null = null;
@@ -184,6 +185,7 @@ class App {
     // Agent 事件流 → 聊天消息累积
     window.easycode.onAgentEvent((data) => this.handleAgentEvent(data));
     void this.restoreChatSession();
+    void this.restoreOpenTabs();
     window.easycode.onAgentExit((data) => {
       if (data.id === this.chatSessionId) {
         this.chatRunning = false;
@@ -1683,6 +1685,7 @@ class App {
   }
 
   private renderTabs(): void {
+    this.scheduleSaveOpenTabs();
     const el = this.root.querySelector(".tabs");
     if (!el) return;
     if (!this.tabs.length) {
@@ -1926,6 +1929,7 @@ class App {
       this.editor.onDidChangeCursorPosition((e) => {
         this.cursorLabel = `Ln ${e.position.lineNumber}, Col ${e.position.column}`;
         this.renderStatus();
+        this.scheduleSaveOpenTabs();
       });
       this.editor.onDidChangeModelContent(() => {
         if (this.ignoringModelChange) return;
@@ -2186,6 +2190,82 @@ class App {
     } catch {
       /* restore fail silent */
     }
+  }
+
+  private scheduleSaveOpenTabs(): void {
+    if (this.openTabsTimer !== null) return;
+    this.openTabsTimer = window.setTimeout(() => {
+      this.openTabsTimer = null;
+      void this.saveOpenTabs();
+    }, 500);
+  }
+
+  private async saveOpenTabs(): Promise<void> {
+    try {
+      const active = this.activeTab();
+      let cursor: { line: number; col: number } | undefined;
+      try {
+        if (active && active.kind !== "diff" && this.editor) {
+          const pos = this.editor.getPosition();
+          if (pos) cursor = { line: pos.lineNumber, col: pos.column };
+        }
+      } catch { /* ignore */ }
+      const tabs = this.tabs
+        .filter((tb) => tb.kind !== "diff" && tb.path)
+        .map((tb) => ({
+          path: tb.path,
+          cursor: active && tb.id === active.id && cursor ? cursor : undefined,
+        }));
+      const state = {
+        workspace: this.workspace,
+        tabs,
+        activePath: active && active.kind !== "diff" ? active.path : null,
+        savedAt: Date.now(),
+      };
+      const cfg = { ...(this.settings.configuration || {}) };
+      const ws = { ...((cfg.workspaceState as Record<string, unknown>) || {}) };
+      ws.openTabs = state;
+      cfg.workspaceState = ws;
+      this.settings = await window.easycode.setSettings({ configuration: cfg });
+    } catch { /* silent */ }
+  }
+
+  private async restoreOpenTabs(): Promise<void> {
+    try {
+      if (!this.workspace) return;
+      const cfg = this.settings.configuration || {};
+      const ws = (cfg.workspaceState as Record<string, unknown>) || {};
+      const st = ws.openTabs as
+        | { workspace?: string; tabs?: { path: string; cursor?: { line: number; col: number } }[]; activePath?: string | null }
+        | undefined;
+      if (!st || st.workspace !== this.workspace) return;
+      const list = st.tabs || [];
+      for (const item of list) {
+        if (!item.path) continue;
+        try {
+          if (!(await window.easycode.exists(item.path))) continue;
+          await this.openFile(item.path);
+        } catch { /* skip broken */ }
+      }
+      if (st.activePath) {
+        const tab = this.tabs.find((tb) => this.samePath(tb.path, st.activePath as string));
+        if (tab) {
+          this.activeTabId = tab.id;
+          this.renderEditorHost();
+          this.renderBreadcrumbs();
+        }
+        const activeState = list.find((it) => it.path === st.activePath);
+        if (activeState && activeState.cursor && this.editor) {
+          try {
+            const pos = { lineNumber: activeState.cursor.line, column: activeState.cursor.col };
+            this.editor.setPosition(pos);
+            this.editor.revealPositionInCenter(pos);
+          } catch { /* ignore */ }
+        }
+      }
+      this.renderTabs();
+      this.renderStatus();
+    } catch { /* silent */ }
   }
 
   private schedulePersist(): void {
