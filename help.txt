@@ -1,0 +1,44 @@
+EasyCode DevTool — 使用指南（给 AI 助手看）
+
+═══ 工具用途 ═══
+让 AI 与用户协作完成"改代码 → 跑 patch → 提交"闭环，
+全程无需手动开 VS Code 编辑文件或敲 PowerShell 命令。
+
+═══ Tab 布局 ═══
+① 文件操作（左）  —— 粘贴 JSON，批量写入/追加/删除/创建文件
+② Patch & Commit（中）—— 选 patch 脚本、跑 patch、typecheck、git 提交
+③ 帮助（右）      —— 本说明（内容来自根目录 help.txt）
+
+═══ 典型工作流 ═══
+1. AI 生成一段 JSON（内含 patch-xxx.cjs 的完整内容）
+2. 用户在「文件操作」tab 粘贴 JSON
+3. 用户点「⚡ 一键运行」
+4. 工具自动：写文件 → 切到 Patch tab → 选中刚写的文件 → 跑 patch → 复制输出到剪贴板
+5. 用户 Ctrl+V 把输出粘回给 AI
+
+═══ 文件操作 JSON 格式 ═══
+[
+  {"op": "write",  "path": "patch-xxx.cjs", "content": "..."},
+  {"op": "append", "path": "...",           "content": "..."},
+  {"op": "delete", "path": "..."},
+  {"op": "mkdir",  "path": "..."}
+]
+路径相对项目根。write / append 自动创建父目录。
+
+═══ 关键约定 ═══
+- patch 脚本名必须以 patch- 开头、.cjs 结尾，才会出现在下拉里
+- 「⚡ 一键运行」只跑 patch，不跑 typecheck
+- 需要 typecheck 用「▶ 执行 + Patch + Typecheck」按钮
+- 输出是 UTF-8，粘贴回 AI 不会乱码
+
+═══ 为什么要用这套流程 ═══
+- 避免 PowerShell 的多层转义和编码坑（UTF-8 常被写坏）
+- Python 直接调 node / npm / git，稳定可靠
+- 一次点击完成"写文件 + 跑脚本 + 复制输出"
+
+═══ 给 AI 的历史踩坑提醒 ═══
+- 源文件多为 CRLF：写 patch 时按行处理，避免用反斜杠 n 匹配多行
+- 不要用 PowerShell Set-Content 改源码（会坏 UTF-8）
+- patch 脚本要幂等：先检测锚点是否存在，已存在就跳过
+- patch 脚本要能在 devtool 里直接运行（用 CommonJS require）
+- 中文字符保存为 UTF-8，不要 BOM

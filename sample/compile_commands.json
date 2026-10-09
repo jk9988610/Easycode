@@ -1,0 +1,7 @@
+[
+  {
+    "directory": "E:/tools/Easycode/sample",
+    "command": "clang -c hello.c -o hello.o",
+    "file": "hello.c"
+  }
+]

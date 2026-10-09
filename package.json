@@ -1,0 +1,87 @@
+{
+  "name": "easycode",
+  "version": "0.1.0",
+  "description": "Easycode - clean VS Code-like editor shell",
+  "main": "dist-electron/index.js",
+  "type": "module",
+  "scripts": {
+    "build:electron": "node scripts/build-electron.mjs",
+    "dev:renderer": "vite",
+    "dev:electron": "node scripts/build-electron.mjs --watch",
+    "dev:app": "cross-env VITE_DEV_SERVER_URL=http://localhost:5180 electron .",
+    "dev": "npm run build:electron && concurrently -k -n vite,electron,app -c cyan,magenta,green \"npm run dev:renderer\" \"npm run dev:electron\" \"wait-on tcp:5180 && npm run dev:app\"",
+    "build": "npm run build:electron && vite build",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win nsis",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit"
+  },
+  "keywords": [
+    "editor",
+    "easycode",
+    "electron",
+    "monaco"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
+    "@types/node": "^22.20.2",
+    "concurrently": "^10.0.5",
+    "cross-env": "^10.1.0",
+    "electron": "^33.2.1",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vite": "^6.3.5",
+    "wait-on": "^9.1.0"
+  },
+  "dependencies": {
+    "@homebridge/node-pty-prebuilt-multiarch": "^0.14.1",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "adm-zip": "^0.6.1",
+    "iconv-lite": "^0.7.3",
+    "jschardet": "^3.1.4",
+    "monaco-editor": "^0.56.0",
+    "vscode-jsonrpc": "^9.0.2",
+    "vscode-languageserver-protocol": "^3.18.3",
+    "vscode-languageserver-types": "^3.18.3"
+  },
+  "allowScripts": {
+    "@homebridge/node-pty-prebuilt-multiarch@0.14.1": true
+  },
+  "build": {
+    "appId": "com.easycode.app",
+    "productName": "Easycode",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "dist-electron/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "agent-core",
+        "to": "agent-core",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!**/*.bak"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "npmRebuild": false
+  }
+}

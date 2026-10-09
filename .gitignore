@@ -1,0 +1,27 @@
+node_modules/
+dist/
+dist-electron/
+*.log
+.DS_Store
+
+# Python (agent-core)
+__pycache__/
+*.pyc
+*.bak
+
+release/
+*.bak
+run.log
+
+# local API keys / test files
+agent-API
+
+# local API keys / test files
+agent-API
+diffstat.txt
+run.log
+*.bak
+updateplan.md
+
+patch-*.cjs
+dev.log
