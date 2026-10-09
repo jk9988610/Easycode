@@ -6,6 +6,7 @@ import json
 import time
 import shutil
 import threading
+import re
 import subprocess
 
 
@@ -189,6 +190,8 @@ class App:
         f3.pack(fill="x", padx=12, pady=4)
         ttk.Button(f3, text="▶ Patch + Typecheck",
                    command=self.run_all_patch_check, width=26).pack(side="left", padx=4)
+        ttk.Button(f3, text="🚀 智能运行",
+                   command=lambda: self.smart_run("patch"), width=18).pack(side="left", padx=6)
         ttk.Button(f3, text="▶ Patch + Typecheck + 提交",
                    command=self.run_full, width=30).pack(side="left", padx=4)
 
@@ -231,6 +234,7 @@ class App:
         ttk.Button(bar, text="📂 从 devtasks.json 加载", command=self.load_devtasks).pack(side="left")
         ttk.Button(bar, text="📋 示例", command=self.load_example).pack(side="left", padx=6)
         ttk.Button(bar, text="🗑 清空", command=lambda: self.ops_text.delete("1.0", "end")).pack(side="left")
+        ttk.Button(bar, text="📋 粘贴剪贴板", command=self.paste_from_clipboard, width=16).pack(side="left", padx=6)
 
         self.ops_text = scrolledtext.ScrolledText(
             self.tab_files, height=16, wrap="word", font=("Consolas", 10),
@@ -246,6 +250,8 @@ class App:
                    command=self.run_file_ops, width=20).pack(side="left", padx=2)
         ttk.Button(bottom, text="⚡ 一键运行",
                    command=self.run_oneclick, width=18).pack(side="left", padx=6)
+        ttk.Button(bottom, text="🚀 智能运行",
+                   command=lambda: self.smart_run("files"), width=18).pack(side="left", padx=6)
         ttk.Button(bottom, text="▶ 执行 + Patch + Typecheck",
                    command=self.run_ops_patch_check, width=30).pack(side="left", padx=6)
 
@@ -260,6 +266,106 @@ class App:
 
     def clear_log(self):
         self.output.delete("1.0", "end")
+
+    def paste_from_clipboard(self):
+        try:
+            content = self.root.clipboard_get()
+        except Exception:
+            self.set_status("剪贴板为空或不可读")
+            return
+        if not isinstance(content, str):
+            content = str(content)
+        self.ops_text.delete("1.0", "end")
+        self.ops_text.insert("1.0", content)
+        self.set_status("已粘贴剪贴板内容（" + str(len(content)) + " 字符）")
+
+    def _get_clipboard(self):
+        try:
+            content = self.root.clipboard_get()
+        except Exception:
+            return None
+        if not isinstance(content, str):
+            content = str(content)
+        return content
+
+    def _extract_json_blocks(self, text):
+        parts = text.split("```")
+        results = []
+        i = 1
+        while i < len(parts):
+            block = parts[i]
+            if block.startswith("json"):
+                block = block[4:]
+            block = block.strip()
+            try:
+                data = json.loads(block)
+                if isinstance(data, list):
+                    results.append(data)
+            except Exception:
+                pass
+            i += 2
+        return results
+
+    def _try_parse_ops_json(self, text):
+        s = text.strip()
+        if not s.startswith("["):
+            return None
+        try:
+            data = json.loads(s)
+            if isinstance(data, list):
+                return data
+        except Exception:
+            pass
+        return None
+
+    def _find_patch_name(self, text):
+        idx = text.find("patch-")
+        if idx < 0:
+            return None
+        end = text.find(".cjs", idx)
+        if end < 0:
+            return None
+        candidate = text[idx:end + 4]
+        for ch in candidate:
+            if ch in " " + chr(9) + chr(13) + chr(10):
+                return None
+        return candidate
+
+    def smart_run(self, source_tab):
+        content = self._get_clipboard()
+        if not content:
+            self.set_status("剪贴板为空或不可读")
+            return
+        ops = self._try_parse_ops_json(content)
+        if ops is None:
+            blocks = self._extract_json_blocks(content)
+            if blocks:
+                ops = blocks[0]
+        patch_name = self._find_patch_name(content)
+        if ops is not None:
+            n = len(ops)
+            self.set_status("识别为文件操作 JSON（" + str(n) + " 项），执行中...")
+            self.ops_text.delete("1.0", "end")
+            self.ops_text.insert("1.0", json.dumps(ops, ensure_ascii=False, indent=2))
+            if source_tab != "files":
+                self.nb.select(self.tab_files)
+            self._auto_copy_after_run = True
+            self.root.after(80, self.run_file_ops)
+            return
+        if patch_name:
+            self.set_status("识别 patch 脚本：" + patch_name + "，执行中...")
+            self.refresh_patches()
+            self.patch_var.set(patch_name)
+            if source_tab != "patch":
+                self.nb.select(self.tab_patch)
+            self._auto_copy_after_run = True
+            self.root.after(80, self.run_patch)
+            return
+        self.ops_text.delete("1.0", "end")
+        self.ops_text.insert("1.0", content)
+        if source_tab == "patch":
+            self.nb.select(self.tab_files)
+        self.set_status("未识别出明确指令，已填入输入框")
 
     def copy_all(self):
         text = self.output.get("1.0", "end").rstrip()
@@ -321,6 +427,10 @@ class App:
         c = self.run_cmd(["node", name])
         self.log("✅ Patch 成功\n" if c == 0 else "❌ Patch 失败\n")
         self.set_status("patch 完成" if c == 0 else "patch 失败")
+        if getattr(self, "_auto_copy_after_run", False):
+            self._auto_copy_after_run = False
+            self.root.after(80, self._copy_silent)
+            self.set_status("patch 完成，输出已复制到剪贴板")
 
     def run_typecheck(self):
         threading.Thread(target=self._bg_typecheck, daemon=True).start()
@@ -456,6 +566,10 @@ class App:
         ok, fail = self._exec_tasks(tasks)
         self.log(f"\n完成: {ok} 成功, {fail} 失败\n")
         self.set_status(f"{ok} 成功 / {fail} 失败")
+        if getattr(self, "_auto_copy_after_run", False):
+            self._auto_copy_after_run = False
+            self.root.after(80, self._copy_silent)
+            self.set_status("文件操作完成，输出已复制到剪贴板")
 
     def _exec_tasks(self, tasks):
         ok, fail = 0, 0

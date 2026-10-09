@@ -18,4 +18,5 @@ diffstat.txt
 updateplan.md
 
 patch-*.cjs
+patch-*.py
 dev.log
