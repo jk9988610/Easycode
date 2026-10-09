@@ -79,6 +79,7 @@ class App {
   private chatMessages: ChatMessage[] = [];
   private chatRunning = false;
   private chatSessionId: string | null = null;
+  private chatSessions: { id: string; title: string; updatedAt: number }[] = [];
   private persistSessionId: string | null = null;
   private persistCreatedAt = 0;
   private persistTimer: number | null = null;
@@ -2012,6 +2013,14 @@ class App {
     const hasHistory = this.chatMessages.length > 0;
     return `
       <div class="chat-pane">
+        <div class="chat-header">
+          <select data-chat-sessions title="历史对话">
+            ${this.chatSessions.length
+              ? this.chatSessions.map((s) => `<option value="${escapeHtml(s.id)}"${s.id === this.persistSessionId ? " selected" : ""}>${escapeHtml((s.title || "untitled").slice(0, 30))}</option>`).join("")
+              : `<option value="">(暂无历史)</option>`}
+          </select>
+          <button type="button" data-chat-new title="新建对话">+ 新建</button>
+        </div>
         <div class="chat-stream" data-chat-stream>
           ${messages}
         </div>
@@ -2078,6 +2087,9 @@ class App {
     stopBtn?.addEventListener("click", () => this.stopChat());
     clearBtn?.addEventListener("click", () => void this.clearChat());
     body.querySelector("[data-chat-rollback-bar]")?.addEventListener("click", () => void this.rollbackChat());
+    const _sel = body.querySelector("[data-chat-sessions]") as HTMLSelectElement | null;
+    _sel?.addEventListener("change", () => void this.switchChatSession(_sel.value));
+    body.querySelector("[data-chat-new]")?.addEventListener("click", () => void this.newChatSession());
     input?.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
@@ -2126,6 +2138,7 @@ class App {
   private async restoreChatSession(): Promise<void> {
     try {
       const list = await window.easycode.listSessions();
+      this.chatSessions = list || [];
       if (!list || list.length === 0) return;
       const latest = list[0];
       const data = await window.easycode.loadSession(latest.id);
@@ -2166,6 +2179,45 @@ class App {
     } catch {
       /* save fail silent */
     }
+  }
+
+  private async switchChatSession(id: string): Promise<void> {
+    if (!id || id === this.persistSessionId) return;
+    await this.persistChat();
+    if (this.chatSessionId) {
+      void window.easycode.agentStop(this.chatSessionId);
+      this.chatSessionId = null;
+    }
+    try {
+      const data = await window.easycode.loadSession(id);
+      if (!data) return;
+      this.persistSessionId = data.id;
+      this.persistCreatedAt = data.createdAt || Date.now();
+      this.chatMessages = (data.messages as ChatMessage[]) || [];
+      this.chatRunning = false;
+      this.renderRightbar();
+    } catch {
+      /* silent */
+    }
+  }
+
+  private async newChatSession(): Promise<void> {
+    await this.persistChat();
+    if (this.chatSessionId) {
+      await window.easycode.agentClear(this.chatSessionId);
+      this.chatSessionId = null;
+    }
+    this.chatMessages = [];
+    this.chatRunning = false;
+    this.persistSessionId = null;
+    this.persistCreatedAt = 0;
+    try {
+      const list = await window.easycode.listSessions();
+      this.chatSessions = list || [];
+    } catch {
+      this.chatSessions = [];
+    }
+    this.renderRightbar();
   }
 
   private async clearChat(): Promise<void> {
