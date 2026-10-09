@@ -2192,3 +2192,19 @@ button.status-item:hover {
 .rightbar-sash:hover {
   background: linear-gradient(to left, transparent 2px, var(--accent) 2px, var(--accent) 4px, transparent 4px);
 }
+
+/* tab git status badge */
+.tab .git-badge {
+  font-size: 10px;
+  font-weight: 700;
+  margin-left: 4px;
+  padding: 0 3px;
+  border-radius: 2px;
+  font-family: Cascadia Mono, Consolas, monospace;
+  flex-shrink: 0;
+}
+.tab .git-badge.git-m { color: #d4a35c; }
+.tab .git-badge.git-a { color: #7dcea0; }
+.tab .git-badge.git-u { color: #5eb3c4; }
+.tab .git-badge.git-d { color: #f1948a; }
+.tab .git-badge.git-r { color: #79b8ff; }

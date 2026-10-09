@@ -43,6 +43,7 @@ class App {
   });
   private workspace = "";
   private tabs: EditorTab[] = [];
+  private gitFileStatus = new Map<string, string>();
   private activeTabId: string | null = null;
   private expanded = new Set<string>();
   private treeCache = new Map<string, Awaited<ReturnType<typeof window.easycode.listDir>>>();
@@ -382,6 +383,7 @@ class App {
     this.activity = "explorer";
     await window.easycode.watchWorkspace(folder);
     this.render();
+    void this.refreshGitFileStatus();
     const st = await window.easycode.lspStatus();
     this.applyLspStatus(st);
     this.renderStatus();
@@ -620,6 +622,7 @@ class App {
     this.renderTabs();
     this.renderStatus();
     if (this.activity === "explorer") this.renderSidebarBody();
+    void this.refreshGitFileStatus();
   }
 
   private async closeTab(id: string): Promise<void> {
@@ -1625,6 +1628,49 @@ class App {
     });
   }
 
+  private normalizePath(p: string): string {
+    return p.replace(/\\/g, "/").toLowerCase();
+  }
+
+  private relPathFromAbs(absPath: string): string {
+    const ws = this.normalizePath(this.workspace);
+    const p = this.normalizePath(absPath);
+    if (!ws) return p;
+    if (p === ws) return "";
+    if (p.startsWith(ws + "/")) return p.slice(ws.length + 1);
+    return p;
+  }
+
+  private async refreshGitFileStatus(): Promise<void> {
+    if (!this.workspace) {
+      this.gitFileStatus.clear();
+      this.renderTabs();
+      return;
+    }
+    try {
+      const st = (await window.easycode.gitStatus(this.workspace)) as {
+        ok: boolean;
+        files?: { path: string; index: string; worktree: string; untracked: boolean }[];
+      };
+      this.gitFileStatus.clear();
+      if (st && st.ok && st.files) {
+        for (const f of st.files) {
+          let ch = "?";
+          if (f.untracked) ch = "U";
+          else if (f.index === "A") ch = "A";
+          else if (f.index === "D" || f.worktree === "D") ch = "D";
+          else if (f.index === "R") ch = "R";
+          else if (f.index === "M" || f.worktree === "M") ch = "M";
+          else ch = f.index !== " " && f.index !== "?" ? f.index : f.worktree;
+          this.gitFileStatus.set(this.normalizePath(f.path), ch);
+        }
+      }
+      this.renderTabs();
+    } catch {
+      /* ignore */
+    }
+  }
+
   private renderTabs(): void {
     const el = this.root.querySelector(".tabs");
     if (!el) return;
@@ -1639,6 +1685,7 @@ class App {
         t.id,
       )}">
         <span class="label ${t.dirty ? "dirty" : ""}">${escapeHtml(t.name)}${t.dirty ? " ●" : ""}</span>
+        ${(() => { const rel = this.relPathFromAbs(t.path); const ch = this.gitFileStatus.get(rel); return ch ? `<span class="git-badge git-${ch.toLowerCase()}">${ch}</span>` : ""; })()}
         <span class="close" data-close="${escapeAttr(t.id)}">×</span>
       </button>`,
       )
