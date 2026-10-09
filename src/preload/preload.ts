@@ -154,6 +154,48 @@ const api = {
   termResize: (id: string, cols: number, rows: number) =>
     ipcRenderer.invoke("term:resize", id, cols, rows),
   termKill: (id: string) => ipcRenderer.invoke("term:kill", id),
+  // Agent (agent-core Python 子进程)
+  agentRun: (task: string): Promise<string> =>
+    ipcRenderer.invoke("agent:run", task),
+  agentStop: (id: string): Promise<void> =>
+    ipcRenderer.invoke("agent:stop", id),
+  agentList: () => ipcRenderer.invoke("agent:list"),
+  onAgentEvent: (
+    cb: (data: {
+      id: string;
+      ts: number;
+      type: string;
+      turn?: number;
+      content?: string;
+      name?: string;
+      arguments?: string;
+      result?: string;
+      message?: string;
+    }) => void,
+  ) => {
+    const listener = (
+      _: unknown,
+      data: {
+        id: string;
+        ts: number;
+        type: string;
+        turn?: number;
+        content?: string;
+        name?: string;
+        arguments?: string;
+        result?: string;
+        message?: string;
+      },
+    ) => cb(data);
+    ipcRenderer.on("agent:event", listener);
+    return () => ipcRenderer.removeListener("agent:event", listener);
+  },
+  onAgentExit: (cb: (data: { id: string; code: number | null }) => void) => {
+    const listener = (_: unknown, data: { id: string; code: number | null }) =>
+      cb(data);
+    ipcRenderer.on("agent:exit", listener);
+    return () => ipcRenderer.removeListener("agent:exit", listener);
+  },
   windowMinimize: () => ipcRenderer.invoke("window:minimize"),
   windowMaximize: () => ipcRenderer.invoke("window:maximize"),
   windowClose: () => ipcRenderer.invoke("window:close"),

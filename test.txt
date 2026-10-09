@@ -1,0 +1,1 @@
+写一个脚本ps1,要求能运行E:\tools\Easycode\calc.py

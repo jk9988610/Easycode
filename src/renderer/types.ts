@@ -52,6 +52,7 @@ export interface AppSettings {
   panelView: PanelView;
   rightView: RightView;
   defaultTerminal: ShellKind;
+  agentApiKey: string;
   pluginsEnabled: Record<string, boolean>;
   extensionSettings: Record<string, Record<string, unknown>>;
   configuration: Record<string, unknown>;
@@ -77,6 +78,46 @@ export interface EditorTab {
   dirty: boolean;
   language: string;
   encoding: string;
+}
+
+/** agent-core 事件 payload(主进程转发给渲染进程)。 */
+export interface AgentEventPayload {
+  id: string;
+  ts: number;
+  type:
+    | "turn_start"
+    | "thinking"
+    | "tool_call"
+    | "tool_result"
+    | "final"
+    | "stopped"
+    | "error";
+  turn?: number;
+  content?: string;
+  name?: string;
+  arguments?: string;
+  result?: string;
+  message?: string;
+}
+
+/** 一条聊天对话消息(由 agent 事件流累积而成)。 */
+export interface ChatMessage {
+  /** 渲染进程生成的时间戳,用于排序 */
+  ts: number;
+  /** 消息类型 */
+  kind: "thinking" | "tool_call" | "tool_result" | "final" | "error";
+  /** 工具名(tool_call/tool_result) */
+  toolName?: string;
+  /** 工具参数(tool_call) */
+  toolArgs?: string;
+  /** 工具结果(tool_result) */
+  toolResult?: string;
+  /** 文字内容(thinking/final) */
+  text?: string;
+  /** 错误信息(error) */
+  message?: string;
+  /** 所属轮次 */
+  turn?: number;
 }
 
 export interface EasycodeApi {
@@ -146,6 +187,14 @@ export interface EasycodeApi {
   termWrite: (id: string, data: string) => Promise<void>;
   termResize: (id: string, cols: number, rows: number) => Promise<void>;
   termKill: (id: string) => Promise<void>;
+  // Agent (agent-core Python 子进程)
+  agentRun: (task: string) => Promise<string>;
+  agentStop: (id: string) => Promise<void>;
+  agentList: () => Promise<{ id: string; cwd: string }[]>;
+  onAgentEvent: (
+    cb: (data: AgentEventPayload) => void,
+  ) => () => void;
+  onAgentExit: (cb: (data: { id: string; code: number | null }) => void) => () => void;
   windowMinimize: () => Promise<void>;
   windowMaximize: () => Promise<boolean>;
   windowClose: () => Promise<void>;

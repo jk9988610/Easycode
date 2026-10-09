@@ -10,7 +10,7 @@ const shared = {
   platform: "node",
   target: "node18",
   sourcemap: true,
-  external: ["electron", "iconv-lite", "jschardet", "adm-zip"],
+  external: ["electron", "iconv-lite", "jschardet", "adm-zip", "node-pty"],
   logLevel: "info",
 };
 

@@ -25,6 +25,8 @@ export interface AppSettings {
   panelView: PanelView;
   rightView: RightView;
   defaultTerminal: "powershell" | "cmd" | "gitbash";
+  /** DeepSeek API key for agent-core. */
+  agentApiKey: string;
   /** Reserved for future extension-contributed language servers. */
   pluginsEnabled: Record<string, boolean>;
   extensionSettings: Record<string, Record<string, unknown>>;
@@ -49,6 +51,7 @@ const DEFAULTS: AppSettings = {
   panelView: "terminal",
   rightView: "info",
   defaultTerminal: "powershell",
+  agentApiKey: "",
   pluginsEnabled: {},
   extensionSettings: {},
   configuration: {},

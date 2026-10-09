@@ -39,8 +39,12 @@
     "iconv-lite": "^0.7.3",
     "jschardet": "^3.1.4",
     "monaco-editor": "^0.56.0",
+    "node-pty": "^1.1.0",
     "vscode-jsonrpc": "^9.0.2",
     "vscode-languageserver-protocol": "^3.18.3",
     "vscode-languageserver-types": "^3.18.3"
+  },
+  "allowScripts": {
+    "node-pty@1.1.0": true
   }
 }

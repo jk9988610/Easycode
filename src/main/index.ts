@@ -9,6 +9,7 @@ import { PluginHost } from "./plugins";
 import { TerminalHost, type ShellKind } from "./terminal";
 import { FileWatcher } from "./fileWatcher";
 import { ExtensionHost, createExtensionBridge } from "./extensionHost";
+import { AgentHost, type AgentEvent } from "./agentHost";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -16,6 +17,7 @@ let mainWindow: BrowserWindow | null = null;
 let pluginHost: PluginHost | null = null;
 let extensionHost: ExtensionHost | null = null;
 let terminalHost: TerminalHost | null = null;
+let agentHost: AgentHost | null = null;
 let fileWatcher: FileWatcher | null = null;
 let settings: AppSettings = loadSettingsSafe();
 /** Active language servers keyed by server id (from extension contributes). */
@@ -43,6 +45,7 @@ function loadSettingsSafe(): AppSettings {
       panelView: "terminal",
       rightView: "info",
       defaultTerminal: "powershell",
+      agentApiKey: "",
       pluginsEnabled: {},
       extensionSettings: {},
       configuration: {},
@@ -247,6 +250,20 @@ function registerIpc(): void {
   ipcMain.handle("term:kill", (_e, id: string) => {
     terminalHost?.kill(id);
   });
+
+  // --- Agent (agent-core Python 子进程) ---
+  ipcMain.handle("agent:run", (_e, task: string) => {
+    if (!agentHost) throw new Error("agent host 未初始化");
+    const apiKey = settings.agentApiKey;
+    if (!apiKey) throw new Error("未配置 DeepSeek API Key,请在设置中填写");
+    const cwd = settings.lastWorkspace;
+    if (!cwd || !fs.existsSync(cwd)) throw new Error("未打开工作区,无法启动 agent");
+    return agentHost.run(task, { cwd, apiKey });
+  });
+  ipcMain.handle("agent:stop", (_e, id: string) => {
+    agentHost?.stop(id);
+  });
+  ipcMain.handle("agent:list", () => agentHost?.list() ?? []);
 
   ipcMain.handle("lsp:request", async (_e, method: string, params: unknown) => {
     const session = pickServer(params);
@@ -497,6 +514,14 @@ app.whenReady().then(async () => {
       mainWindow?.webContents.send("term:exit", { id, code });
     },
   });
+  agentHost = new AgentHost({
+    onEvent: (id, event: AgentEvent) => {
+      mainWindow?.webContents.send("agent:event", { id, ...event });
+    },
+    onExit: (id, code) => {
+      mainWindow?.webContents.send("agent:exit", { id, code });
+    },
+  });
   extensionHost = new ExtensionHost(
     createExtensionBridge({
       getWorkspace: () => settings.lastWorkspace || null,
@@ -545,6 +570,7 @@ app.on("window-all-closed", () => {
   void extensionHost?.deactivateAll();
   void stopAllServers();
   terminalHost?.dispose();
+  agentHost?.dispose();
   fileWatcher?.dispose();
   if (process.platform !== "darwin") app.quit();
 });

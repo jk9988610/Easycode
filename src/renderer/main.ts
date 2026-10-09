@@ -22,7 +22,9 @@ import {
 import { extensionsPanelHtml } from "./extensionsView";
 import type {
   ActivityId,
+  AgentEventPayload,
   AppSettings,
+  ChatMessage,
   EditorTab,
   PanelView,
   ShellKind,
@@ -63,6 +65,10 @@ class App {
   private extOutputChannels: import("./types").OutputChannelDto[] = [];
   private extActiveOutputId: string | null = null;
   private extCommandIds: string[] = [];
+  // --- Agent chat ---
+  private chatMessages: ChatMessage[] = [];
+  private chatRunning = false;
+  private chatSessionId: string | null = null;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -159,6 +165,16 @@ class App {
     });
     void window.easycode.listExtensionCommands().then((ids) => {
       this.extCommandIds = ids;
+    });
+
+    // Agent 事件流 → 聊天消息累积
+    window.easycode.onAgentEvent((data) => this.handleAgentEvent(data));
+    window.easycode.onAgentExit((data) => {
+      if (data.id === this.chatSessionId) {
+        this.chatRunning = false;
+        this.chatSessionId = null;
+        this.renderRightbar();
+      }
     });
 
     window.addEventListener("keydown", (e) => this.onGlobalKey(e));
@@ -308,13 +324,20 @@ class App {
     this.applyLayoutClasses();
     this.renderTitlebar();
     this.renderBottomPanel();
+    // 切到终端时自动打开默认终端
+    if (view === "terminal" && this.terminalPanel && !this.terminalPanel.hasTabs()) {
+      await this.terminalPanel.open(this.settings.defaultTerminal);
+      this.renderPanelChrome();
+      this.terminalPanel?.layout();
+    }
   }
 
   private async openChatPlaceholder(): Promise<void> {
-    if (!this.settings.showRightSidebar) {
-      this.settings = await window.easycode.setSettings({ showRightSidebar: true });
-      this.applyLayoutClasses();
-    }
+    this.settings = await window.easycode.setSettings({
+      showRightSidebar: true,
+      rightView: "chat",
+    });
+    this.applyLayoutClasses();
     this.renderTitlebar();
     this.renderRightbar();
   }
@@ -332,7 +355,9 @@ class App {
   private ensureTerminalPanel(): void {
     const host = this.root.querySelector("#term-host") as HTMLElement | null;
     if (!host) return;
-    if (!this.terminalPanel) this.terminalPanel = new TerminalPanel(host);
+    if (!this.terminalPanel) {
+      this.terminalPanel = new TerminalPanel(host);
+    }
   }
 
   private async openFolder(): Promise<void> {
@@ -638,7 +663,7 @@ class App {
       withKeys("terminal", "显示终端", "Ctrl+`", () =>
         void this.openTerminal(this.settings.defaultTerminal),
       ),
-      withKeys("chat", "AI 聊天（占位）", undefined, () => void this.openChatPlaceholder()),
+      withKeys("chat", "AI 聊天", undefined, () => void this.openChatPlaceholder()),
       withKeys("explorer", "转到：资源管理器", undefined, () => {
         this.activity = "explorer";
         this.render();
@@ -666,9 +691,15 @@ class App {
   private render(): void {
     this.panelResizeCleanup?.();
     this.panelResizeCleanup = null;
+    // 保留终端会话:不 dispose,只把 DOM 元素从旧树摘下,re-render 后重新挂回
+    const savedTermViews: { id: string; el: HTMLElement }[] = [];
     if (this.terminalPanel) {
-      this.terminalPanel.dispose();
-      this.terminalPanel = null;
+      for (const tab of (this.terminalPanel as any).tabs as any[]) {
+        if (tab.el && tab.el.parentNode) {
+          tab.el.parentNode.removeChild(tab.el);
+          savedTermViews.push({ id: tab.id, el: tab.el });
+        }
+      }
     }
     this.disposeEditors();
 
@@ -724,6 +755,18 @@ class App {
     this.renderRightbar();
     this.renderBottomPanel();
     this.bindPanelResize();
+    // 把存活的终端 DOM 视图重新挂回新的 #term-host 容器
+    if (savedTermViews.length && this.terminalPanel) {
+      const host = this.root.querySelector("#term-host") as HTMLElement | null;
+      if (host) {
+        for (const sv of savedTermViews) {
+          host.appendChild(sv.el);
+        }
+        // 切换到当前活动终端可见
+        const activeId = (this.terminalPanel as any).activeId;
+        if (activeId) this.terminalPanel.activate(activeId);
+      }
+    }
     this.renderStatus();
     this.renderCommandPalette();
     if (this.settingsOpen) this.renderSettingsModal();
@@ -1308,6 +1351,8 @@ class App {
     this.settingsOpen = false;
     this.root.querySelector(".settings-modal")?.remove();
     this.renderActivity();
+    // 设置可能改了 agentApiKey 等,刷新聊天栏
+    this.renderRightbar();
   }
 
   private renderSettingsModal(): void {
@@ -1485,6 +1530,17 @@ class App {
             this.settings.showRightSidebar ? "checked" : ""
           } /> 显示聊天侧栏</label>
         </div>`;
+    } else if (category === "chat") {
+      el.innerHTML = `
+        <div class="settings-item">
+          <div class="settings-item-title">DeepSeek API Key</div>
+          <div class="settings-item-desc">
+            agent-core 使用的 DeepSeek API Key。获取地址:https://platform.deepseek.com/api-keys
+          </div>
+          <input type="password" id="set-agentKey" value="${escapeAttr(
+            this.settings.agentApiKey || "",
+          )}" placeholder="sk-..." style="width:100%;max-width:480px" />
+        </div>`;
     } else {
       el.innerHTML = soon;
       return;
@@ -1501,6 +1557,9 @@ class App {
       this.renderTitlebar();
       if ("showPanel" in patch && this.settings.showPanel) {
         this.renderBottomPanel();
+      }
+      if ("agentApiKey" in patch) {
+        this.renderRightbar();
       }
     };
 
@@ -1532,6 +1591,17 @@ class App {
     el.querySelector("#set-fontFamily")?.addEventListener("change", () => {
       void persist({
         fontFamily: (el.querySelector("#set-fontFamily") as HTMLInputElement).value,
+      });
+    });
+    el.querySelector("#set-agentKey")?.addEventListener("input", () => {
+      void persist({
+        agentApiKey: (el.querySelector("#set-agentKey") as HTMLInputElement).value,
+      });
+    });
+    // 关闭设置时也兜底保存一次(change 在 blur 时触发,input 可能漏掉最后一次)
+    el.querySelector("#set-agentKey")?.addEventListener("change", () => {
+      void persist({
+        agentApiKey: (el.querySelector("#set-agentKey") as HTMLInputElement).value,
       });
     });
   }
@@ -1688,7 +1758,144 @@ class App {
   private renderRightbar(): void {
     const body = this.root.querySelector(".rightbar-body") as HTMLElement | null;
     if (!body) return;
-    body.innerHTML = chatPlaceholderHtml({ withInput: true });
+    const view = this.settings.rightView || "info";
+    if (view !== "chat") {
+      body.innerHTML = chatPlaceholderHtml({ withInput: false });
+      return;
+    }
+    body.innerHTML = this.renderChatHtml();
+    this.bindChatEvents();
+    this.scrollChatToBottom();
+  }
+
+  // --- Agent chat rendering & logic ---
+
+  private renderChatHtml(): string {
+    const messages = this.chatMessages.length
+      ? this.chatMessages
+          .map((m) => this.renderChatMessage(m))
+          .join("")
+      : `<div class="chat-empty">开始新的对话</div>`;
+    const apiKeyOk = !!this.settings.agentApiKey;
+    const placeholder = apiKeyOk
+      ? "描述任务,例如:给 utils.py 的 add 函数加上类型检查,然后运行测试"
+      : "请先在设置中填写 DeepSeek API Key";
+    const disabled = !apiKeyOk || this.chatRunning;
+    return `
+      <div class="chat-pane">
+        <div class="chat-stream" data-chat-stream>
+          ${messages}
+        </div>
+        <div class="chat-composer">
+          <textarea rows="3" placeholder="${placeholder}" ${
+            disabled ? "disabled" : ""
+          } data-chat-input></textarea>
+          <div class="chat-composer-bar">
+            ${
+              this.chatRunning
+                ? '<button type="button" data-chat-stop>停止</button>'
+                : '<button type="button" data-chat-send class="primary">发送</button>'
+            }
+          </div>
+        </div>
+      </div>`;
+  }
+
+  private renderChatMessage(m: ChatMessage): string {
+    const esc = escapeHtml;
+    if (m.kind === "thinking")
+      return `<div class="chat-msg thinking"><span class="chat-icon">💭</span><span>${esc(
+        m.text || "",
+      )}</span></div>`;
+    if (m.kind === "tool_call")
+      return `<div class="chat-msg tool-call"><span class="chat-icon">🔧</span><span><b>${esc(
+        m.toolName || "",
+      )}</b>(${esc(m.toolArgs || "")})</span></div>`;
+    if (m.kind === "tool_result")
+      return `<div class="chat-msg tool-result"><span class="chat-icon">📄</span><pre class="chat-pre">${esc(
+        (m.toolResult || "").slice(0, 500),
+      )}</pre></div>`;
+    if (m.kind === "error")
+      return `<div class="chat-msg error"><span class="chat-icon">❌</span><span>${esc(
+        m.message || m.text || "",
+      )}</span></div>`;
+    // final
+    return `<div class="chat-msg final"><span class="chat-icon">✅</span><span>${esc(
+      m.text || "",
+    )}</span></div>`;
+  }
+
+  private bindChatEvents(): void {
+    const body = this.root.querySelector(".rightbar-body");
+    if (!body) return;
+    const input = body.querySelector("[data-chat-input]") as HTMLTextAreaElement | null;
+    const sendBtn = body.querySelector("[data-chat-send]");
+    const stopBtn = body.querySelector("[data-chat-stop]");
+    sendBtn?.addEventListener("click", () => this.sendChatMessage());
+    stopBtn?.addEventListener("click", () => this.stopChat());
+    input?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        this.sendChatMessage();
+      }
+    });
+  }
+
+  private scrollChatToBottom(): void {
+    const stream = this.root.querySelector("[data-chat-stream]");
+    if (stream) stream.scrollTop = stream.scrollHeight;
+  }
+
+  private async sendChatMessage(): Promise<void> {
+    const input = this.root.querySelector(
+      "[data-chat-input]",
+    ) as HTMLTextAreaElement | null;
+    if (!input) return;
+    const task = input.value.trim();
+    if (!task || this.chatRunning) return;
+    // 显示用户消息
+    this.chatMessages.push({ ts: Date.now(), kind: "final", text: `📝 ${task}` });
+    input.value = "";
+    this.chatRunning = true;
+    this.renderRightbar();
+    try {
+      this.chatSessionId = await window.easycode.agentRun(task);
+    } catch (e) {
+      this.chatMessages.push({
+        ts: Date.now(),
+        kind: "error",
+        text: e instanceof Error ? e.message : String(e),
+      });
+      this.chatRunning = false;
+    }
+    this.renderRightbar();
+  }
+
+  private stopChat(): void {
+    if (this.chatSessionId) void window.easycode.agentStop(this.chatSessionId);
+    this.chatRunning = false;
+    this.chatSessionId = null;
+    this.renderRightbar();
+  }
+
+  private handleAgentEvent(data: AgentEventPayload): void {
+    const m: ChatMessage = {
+      ts: data.ts * 1000,
+      kind: data.type === "turn_start" ? "thinking" : (data.type as ChatMessage["kind"]),
+      turn: data.turn,
+      text: data.content,
+      toolName: data.name,
+      toolArgs: data.arguments,
+      toolResult: data.result,
+      message: data.message,
+    };
+    if (data.type === "turn_start") return; // 不显示轮次标记,保持消息流紧凑
+    if (data.type === "final") {
+      this.chatRunning = false;
+      this.chatSessionId = null;
+    }
+    this.chatMessages.push(m);
+    this.renderRightbar();
   }
 
   private renderBottomPanel(): void {
@@ -1750,7 +1957,15 @@ class App {
     } else if (activeView === "terminal") {
       this.ensureTerminalPanel();
       this.renderPanelChrome();
-      this.terminalPanel?.layout();
+      // 切到终端时,如果没有标签页,自动打开默认终端
+      if (this.terminalPanel && !this.terminalPanel.hasTabs()) {
+        void this.terminalPanel.open(this.settings.defaultTerminal).then(() => {
+          this.renderPanelChrome();
+          this.terminalPanel?.layout();
+        });
+      } else {
+        this.terminalPanel?.layout();
+      }
     }
   }
 

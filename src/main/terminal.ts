@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import * as pty from "node-pty";
 
 export type ShellKind = "powershell" | "cmd" | "gitbash";
 
@@ -18,12 +18,15 @@ interface Session {
   id: string;
   kind: ShellKind;
   title: string;
-  proc: ChildProcessWithoutNullStreams;
+  proc: pty.IPty;
 }
 
 /**
- * Lightweight terminal host using child_process (no native node-pty rebuild required).
- * Good enough for cmd / powershell / git-bash inside the bottom panel.
+ * Terminal host backed by node-pty (real PTY / ConPTY on Windows).
+ *
+ * Unlike raw child_process with pipe stdio, a PTY makes the shell think
+ * it's connected to a real terminal — so prompts appear, colors work,
+ * and Enter/cursor keys are handled correctly by the shell itself.
  */
 export class TerminalHost {
   private sessions = new Map<string, Session>();
@@ -49,14 +52,22 @@ export class TerminalHost {
     const workDir =
       cwd && fs.existsSync(cwd) ? cwd : process.env.USERPROFILE || os.homedir();
     const { file, args, title } = resolveShell(kind);
-    const proc = spawn(file, args, {
+
+    // Windows PowerShell 5.1 在 ConPTY 模式下会挂起(已知兼容性问题),
+    // 对 PowerShell 回退到 WinPTY;cmd/bash 用 ConPTY。
+    const useConpty = kind !== "powershell";
+
+    const proc = pty.spawn(file, args, {
+      name: "xterm-256color",
+      cols: 80,
+      rows: 24,
       cwd: workDir,
       env: {
         ...process.env,
         TERM: "xterm-256color",
-      },
-      windowsHide: true,
-      stdio: ["pipe", "pipe", "pipe"],
+        COLORTERM: "truecolor",
+      } as Record<string, string>,
+      useConpty,
     });
 
     const session: Session = {
@@ -67,14 +78,12 @@ export class TerminalHost {
     };
     this.sessions.set(id, session);
 
-    const push = (buf: Buffer) => {
-      this.onData(id, buf.toString("utf-8"));
-    };
-    proc.stdout.on("data", push);
-    proc.stderr.on("data", push);
-    proc.on("exit", (code) => {
+    proc.onData((data: string) => {
+      this.onData(id, data);
+    });
+    proc.onExit(({ exitCode }) => {
       this.sessions.delete(id);
-      this.onExit(id, code);
+      this.onExit(id, exitCode);
     });
 
     return { id, kind, title };
@@ -82,12 +91,18 @@ export class TerminalHost {
 
   write(id: string, data: string): void {
     const s = this.sessions.get(id);
-    if (!s || s.proc.killed) return;
-    s.proc.stdin.write(data);
+    if (!s) return;
+    s.proc.write(data);
   }
 
-  resize(_id: string, _cols: number, _rows: number): void {
-    // child_process shells ignore resize; kept for API symmetry with pty
+  resize(id: string, cols: number, rows: number): void {
+    const s = this.sessions.get(id);
+    if (!s) return;
+    try {
+      s.proc.resize(cols, rows);
+    } catch {
+      /* ignore — resize before spawn completes */
+    }
   }
 
   kill(id: string): void {
@@ -112,24 +127,28 @@ function resolveShell(kind: ShellKind): { file: string; args: string[]; title: s
   }
   if (kind === "gitbash") {
     const candidates = [
-      process.env.PROGRAMFILES ? path.join(process.env.PROGRAMFILES, "Git", "bin", "bash.exe") : "",
+      process.env.PROGRAMFILES
+        ? path.join(process.env.PROGRAMFILES, "Git", "bin", "bash.exe")
+        : "",
       process.env["ProgramFiles(x86)"]
         ? path.join(process.env["ProgramFiles(x86)"], "Git", "bin", "bash.exe")
         : "",
       "C:\\Program Files\\Git\\bin\\bash.exe",
       "bash.exe",
     ].filter(Boolean);
-    const file = candidates.find((p) => {
-      try {
-        return fs.existsSync(p);
-      } catch {
-        return false;
-      }
-    }) || "bash.exe";
+    const file =
+      candidates.find((p) => {
+        try {
+          return fs.existsSync(p);
+        } catch {
+          return false;
+        }
+      }) || "bash.exe";
     return { file, args: ["--login", "-i"], title: "Git Bash" };
   }
-  // powershell
+  // powershell — prefer pwsh (7+) then Windows PowerShell 5.1
   const pwsh = [
+    "pwsh.exe",
     path.join(
       process.env.SystemRoot || "C:\\Windows",
       "System32",
@@ -138,7 +157,6 @@ function resolveShell(kind: ShellKind): { file: string; args: string[]; title: s
       "powershell.exe",
     ),
     "powershell.exe",
-    "pwsh.exe",
   ];
   const file = pwsh.find((p) => {
     try {
@@ -150,6 +168,6 @@ function resolveShell(kind: ShellKind): { file: string; args: string[]; title: s
   return {
     file,
     args: ["-NoLogo"],
-    title: "PowerShell",
+    title: file === "pwsh.exe" ? "pwsh" : "PowerShell",
   };
 }
