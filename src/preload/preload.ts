@@ -170,6 +170,11 @@ const api = {
     ipcRenderer.invoke("agent:stop", id),
   agentRollback: (id: string): Promise<{ ok: boolean; message: string }> =>
     ipcRenderer.invoke("agent:rollback", id),
+  listSessions: () => ipcRenderer.invoke("session:list"),
+  loadSession: (id: string) => ipcRenderer.invoke("session:load", id),
+  saveSession: (payload: { id: string; title: string; createdAt: number; updatedAt: number; messages: unknown[] }) =>
+    ipcRenderer.invoke("session:save", payload),
+  deleteSession: (id: string) => ipcRenderer.invoke("session:delete", id),
   agentList: () => ipcRenderer.invoke("agent:list"),
   onAgentEvent: (
     cb: (data: {

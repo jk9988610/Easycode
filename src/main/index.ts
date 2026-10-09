@@ -11,6 +11,7 @@ import { TerminalHost, type ShellKind } from "./terminal";
 import { FileWatcher } from "./fileWatcher";
 import { ExtensionHost, createExtensionBridge } from "./extensionHost";
 import { AgentHost, type AgentEvent } from "./agentHost";
+import { listSessions, loadSession, saveSession, deleteSession } from "./sessionStore";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -282,6 +283,10 @@ ipcMain.handle("term:list", () => terminalHost?.list() ?? []);
     return await agentHost.rollback(id);
   });
 ipcMain.handle("agent:list", () => agentHost?.list() ?? []);
+ipcMain.handle("session:list", () => listSessions());
+ipcMain.handle("session:load", (_e, id: string) => loadSession(id));
+ipcMain.handle("session:save", (_e, payload: { id: string; title: string; createdAt: number; updatedAt: number; messages: unknown[] }) => saveSession(payload));
+ipcMain.handle("session:delete", (_e, id: string) => deleteSession(id));
 
   ipcMain.handle("lsp:request", async (_e, method: string, params: unknown) => {
     const session = pickServer(params);

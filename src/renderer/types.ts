@@ -214,6 +214,10 @@ export interface EasycodeApi {
   gitDiff: (root: string, path: string, staged: boolean) => Promise<{ ok: boolean; diff?: string; error?: string }>;
   gitShow: (root: string, rev: string, path: string) => Promise<{ ok: boolean; content?: string; error?: string }>;
   agentRollback: (id: string) => Promise<{ ok: boolean; message: string }>;
+  listSessions: () => Promise<{ id: string; title: string; updatedAt: number }[]>;
+  loadSession: (id: string) => Promise<{ id: string; title: string; createdAt: number; updatedAt: number; messages: unknown[] } | null>;
+  saveSession: (payload: { id: string; title: string; createdAt: number; updatedAt: number; messages: unknown[] }) => Promise<boolean>;
+  deleteSession: (id: string) => Promise<boolean>;
   // Agent (agent-core Python 子进程,交互式长对话)
   agentStart: () => Promise<string>;
   agentSend: (id: string, content: string) => Promise<void>;
