@@ -1,4 +1,5 @@
-﻿import "./styles.css";
+// verify-test
+import "./styles.css";
 import "./monaco.css";
 import {
   monaco,
