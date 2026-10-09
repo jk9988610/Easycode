@@ -10,17 +10,11 @@ __pycache__/
 *.bak
 
 release/
-*.bak
 run.log
-
-# local API keys / test files
-agent-API
 
 # local API keys / test files
 agent-API
 diffstat.txt
-run.log
-*.bak
 updateplan.md
 
 patch-*.cjs
