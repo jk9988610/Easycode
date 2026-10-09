@@ -298,7 +298,7 @@ export class AgentHost {
       const p = args.path;
       if (!p) return;
       const norm = p.replace(/\\/g, "/");
-      if (!/\/agent-core\/[^/]+\.py$/.test(norm)) return;
+      if (!/(^|\/)agent-core\/[^/]+\.py$/.test(norm)) return;
       let set = this.pendingPyChanges.get(id);
       if (!set) {
         set = new Set();

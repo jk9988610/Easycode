@@ -22,3 +22,6 @@ diffstat.txt
 run.log
 *.bak
 updateplan.md
+
+patch-*.cjs
+dev.log
