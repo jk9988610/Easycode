@@ -2012,13 +2012,11 @@ class App {
 
   private async rollbackChat(): Promise<void> {
     const id = this.chatSessionId;
-    console.log("[ROLLBACK-DBG] id=", id);
     if (!id) {
       this.showToast("无活动会话，无法回滚");
       return;
     }
     const res = await window.easycode.agentRollback(id);
-    console.log("[ROLLBACK-DBG] res=", res);
     if (res.ok) {
       this.showToast("已回滚本轮改动");
       await this.refreshOpenTabsFromDisk();
