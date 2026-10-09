@@ -2118,32 +2118,24 @@ class App {
     } catch {
       /* ignore */
     }
-    const lines = selText.split(chr(10));
+    const NL2 = String.fromCharCode(10);
+    const BT = String.fromCharCode(96);
+    const lines = selText.split(NL2);
     const MAX = 500;
     let selBlock = "";
     if (selText) {
       if (lines.length > MAX) {
         const half = Math.floor(MAX / 2);
-        const head = lines.slice(0, half).join(chr(10));
-        const tail = lines.slice(-half).join(chr(10));
-        selBlock = "选中代码:
-```
-" + head + "
-... (省略 " + (lines.length - MAX) + " 行) ...
-" + tail + "
-```
-";
+        const head = lines.slice(0, half).join(NL2);
+        const tail = lines.slice(-half).join(NL2);
+        selBlock = "选中代码:" + NL2 + BT + BT + BT + NL2 + head + NL2 + "... (省略 " + (lines.length - MAX) + " 行) ..." + NL2 + tail + NL2 + BT + BT + BT + NL2;
       } else {
-        selBlock = "选中代码:
-```
-" + selText + "
-```
-";
+        selBlock = "选中代码:" + NL2 + BT + BT + BT + NL2 + selText + NL2 + BT + BT + BT + NL2;
       }
     }
     const relPath = tab.path || tab.name;
-    const header = "[上下文] 当前文件: " + relPath + chr(10);
-    return header + selBlock + chr(10) + "用户问题: " + userText;
+    const header = "[上下文] 当前文件: " + relPath + NL2;
+    return header + selBlock + NL2 + "用户问题: " + userText;
   }
 
   private async sendChatMessage(): Promise<void> {
