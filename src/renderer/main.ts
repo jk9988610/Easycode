@@ -287,6 +287,8 @@ class App {
     (shell as HTMLElement).style.setProperty("--panel-h", panelH);
     const sidebarW = `${this.settings.sidebarWidth || 260}px`;
     (shell as HTMLElement).style.setProperty("--sidebar-w", sidebarW);
+    const rightbarW = (this.settings.rightbarWidth || 240) + "px";
+    (shell as HTMLElement).style.setProperty("--rightbar-w", rightbarW);
     const panel = this.root.querySelector(".bottom-panel") as HTMLElement | null;
     if (panel) panel.style.setProperty("--panel-h", panelH);
   }
@@ -747,6 +749,7 @@ class App {
               </div>
             </div>
             <div class="rightbar">
+              <div class="rightbar-sash" title="拖拽调整宽度"></div>
               <div class="rightbar-header">聊天</div>
               <div class="rightbar-body"></div>
             </div>
@@ -767,6 +770,7 @@ class App {
     this.renderBottomPanel();
     this.bindPanelResize();
     this.bindSidebarResize();
+    this.bindRightbarResize();
     // 把存活的终端 DOM 视图重新挂回新的 #term-host 容器
     if (savedTermViews.length && this.terminalPanel) {
       const host = this.root.querySelector("#term-host") as HTMLElement | null;
@@ -2278,6 +2282,33 @@ class App {
         });
       });
     });
+  }
+
+  private bindRightbarResize(): void {
+    const sash = this.root.querySelector(".rightbar-sash") as HTMLElement | null;
+    if (!sash) return;
+    let startX = 0;
+    let startW = 0;
+    const onMove = (e: MouseEvent) => {
+      const delta = startX - e.clientX;
+      const next = Math.max(160, Math.min(600, startW + delta));
+      this.settings.rightbarWidth = next;
+      const shell = this.root.querySelector(".shell") as HTMLElement | null;
+      if (shell) shell.style.setProperty("--rightbar-w", next + "px");
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      void window.easycode.setSettings({ rightbarWidth: this.settings.rightbarWidth });
+    };
+    const onDown = (e: MouseEvent) => {
+      e.preventDefault();
+      startX = e.clientX;
+      startW = this.settings.rightbarWidth || 240;
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    };
+    sash.addEventListener("mousedown", onDown);
   }
 
   private bindSidebarResize(): void {

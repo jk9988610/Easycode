@@ -3,6 +3,7 @@ EasyCode DevTool — 可视化 patch / 文件操作 / typecheck / commit （深�
 """
 import os
 import json
+import time
 import shutil
 import threading
 import subprocess
@@ -18,7 +19,7 @@ BG_ENTRY  = "#0a0d12"
 FG        = "#e6edf2"
 FG_MUTED  = "#7d8590"
 ACCENT    = "#58a6ff"
-ACCENT_H  = "#4fa3b5"
+ACCENT_H  = "#79b8ff"
 LINE      = "#30363d"
 HOVER     = "#1f2429"
 DANGER    = "#f85149"
@@ -27,15 +28,12 @@ OK        = "#3fb950"
 
 def apply_dark_theme(root):
     style = ttk.Style(root)
-    # clam 主题下颜色才能完全自定义
     try:
         style.theme_use("clam")
     except tk.TclError:
         pass
-
     root.configure(bg=BG)
 
-    # Notebook
     style.configure("TNotebook", background=BG, borderwidth=0)
     style.configure("TNotebook.Tab",
                     background=BG_PANEL, foreground=FG_MUTED,
@@ -44,16 +42,13 @@ def apply_dark_theme(root):
               background=[("selected", BG), ("active", HOVER)],
               foreground=[("selected", ACCENT), ("active", FG)])
 
-    # LabelFrame
     style.configure("TLabelframe", background=BG, foreground=FG_MUTED,
                     bordercolor=LINE, lightcolor=LINE, darkcolor=LINE)
     style.configure("TLabelframe.Label", background=BG, foreground=FG_MUTED)
 
-    # Frame
     style.configure("TFrame", background=BG)
     style.configure("TLabel", background=BG, foreground=FG)
 
-    # Button
     style.configure("TButton",
                     background=BG_PANEL, foreground=FG,
                     bordercolor=LINE, lightcolor=LINE, darkcolor=LINE,
@@ -63,14 +58,12 @@ def apply_dark_theme(root):
               foreground=[("active", FG)],
               bordercolor=[("active", ACCENT)])
 
-    # Entry
     style.configure("TEntry",
                     fieldbackground=BG_ENTRY, foreground=FG,
                     bordercolor=LINE, lightcolor=LINE, darkcolor=LINE,
                     insertcolor=FG)
     style.map("TEntry", bordercolor=[("focus", ACCENT)])
 
-    # Combobox
     style.configure("TCombobox",
                     fieldbackground=BG_ENTRY, background=BG_PANEL,
                     foreground=FG, arrowcolor=FG_MUTED,
@@ -80,7 +73,6 @@ def apply_dark_theme(root):
               foreground=[("readonly", FG)],
               bordercolor=[("focus", ACCENT)],
               arrowcolor=[("active", ACCENT)])
-    # Combobox 下拉列表（这个是 Listbox，要单独配）
     root.option_add("*TCombobox*Listbox.background", BG_ENTRY)
     root.option_add("*TCombobox*Listbox.foreground", FG)
     root.option_add("*TCombobox*Listbox.selectBackground", ACCENT)
@@ -92,30 +84,31 @@ class App:
     def __init__(self, root):
         self.root = root
         root.title("EasyCode DevTool")
-        root.geometry("1060x800")
-        root.minsize(880, 620)
+        root.geometry("1060x820")
+        root.minsize(880, 640)
 
         apply_dark_theme(root)
 
-        # 顶部状态
         top = ttk.Frame(root)
         top.pack(fill="x", padx=12, pady=(10, 0))
         self.status_var = tk.StringVar(value="就绪")
         ttk.Label(top, textvariable=self.status_var, foreground=FG_MUTED).pack(side="left")
 
-        # Tabs
-        nb = ttk.Notebook(root)
-        nb.pack(fill="both", expand=True, padx=12, pady=(6, 4))
+        self.nb = ttk.Notebook(root)
+        self.nb.pack(fill="both", expand=True, padx=12, pady=(6, 4))
 
-        self.tab_patch = ttk.Frame(nb)
-        self.tab_files = ttk.Frame(nb)
-        nb.add(self.tab_patch, text="  Patch & Commit  ")
-        nb.add(self.tab_files, text="  文件操作  ")
+        self.tab_files = ttk.Frame(self.nb)
+        self.tab_patch = ttk.Frame(self.nb)
+        # 顺序：文件操作 在 左，Patch 在 右
+        self.nb.add(self.tab_files, text="  文件操作  ")
+        self.nb.add(self.tab_patch, text="  Patch & Commit  ")
+        self.tab_help = ttk.Frame(self.nb)
+        self.nb.add(self.tab_help, text="  帮助  ")
 
-        self._build_patch_tab()
         self._build_files_tab()
+        self._build_patch_tab()
+        self._build_help_tab()
 
-        # 输出区
         out = ttk.LabelFrame(root, text="输出", padding=8)
         out.pack(fill="both", expand=True, padx=12, pady=(0, 12))
 
@@ -163,6 +156,25 @@ class App:
 
         self.refresh_patches()
 
+    # ================= 帮助 Tab =================
+    def _build_help_tab(self):
+        f = ttk.Frame(self.tab_help)
+        f.pack(fill="both", expand=True, padx=12, pady=12)
+        txt = scrolledtext.ScrolledText(
+            f, wrap="word", font=("Consolas", 10),
+            bg=BG_ENTRY, fg=FG, insertbackground=FG,
+            selectbackground=ACCENT, selectforeground=BG,
+            relief="flat", borderwidth=0,
+        )
+        txt.pack(fill="both", expand=True)
+        help_path = os.path.join(ROOT, "help.txt")
+        if os.path.exists(help_path):
+            with open(help_path, "r", encoding="utf-8") as fh:
+                txt.insert("1.0", fh.read())
+        else:
+            txt.insert("1.0", "（未找到 help.txt，请创建后再打开本页）")
+        txt.configure(state="disabled")
+
     # ================= 文件操作 Tab =================
     def _build_files_tab(self):
         info = ttk.Label(
@@ -194,6 +206,8 @@ class App:
         bottom.pack(fill="x", padx=12, pady=(0, 12))
         ttk.Button(bottom, text="▶ 执行文件操作",
                    command=self.run_file_ops, width=20).pack(side="left", padx=2)
+        ttk.Button(bottom, text="⚡ 一键运行",
+                   command=self.run_oneclick, width=18).pack(side="left", padx=6)
         ttk.Button(bottom, text="▶ 执行 + Patch + Typecheck",
                    command=self.run_ops_patch_check, width=30).pack(side="left", padx=6)
 
@@ -214,6 +228,11 @@ class App:
         self.root.clipboard_clear()
         self.root.clipboard_append(text)
         messagebox.showinfo("复制", "输出已复制到剪贴板")
+
+    def _copy_silent(self):
+        text = self.output.get("1.0", "end").rstrip()
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
 
     def set_status(self, t):
         self.root.after(0, lambda: self.status_var.set(t))
@@ -431,6 +450,23 @@ class App:
                 elif op == "mkdir":
                     os.makedirs(full, exist_ok=True)
                     self.log(f"[{i}] mkdir  ✓ {path}")
+                elif op == "shell":
+                    cmd = t.get("cmd", "")
+                    if not cmd:
+                        raise ValueError("empty cmd")
+                    self.log(f"[{i}] shell  $ {cmd}")
+                    sp = subprocess.run(
+                        cmd, cwd=ROOT, shell=True, capture_output=True,
+                        text=True, encoding="utf-8", errors="replace",
+                    )
+                    if sp.stdout:
+                        self.log(sp.stdout.rstrip())
+                    if sp.stderr:
+                        self.log(sp.stderr.rstrip())
+                    self.log(f"[exit {sp.returncode}]")
+                    if sp.returncode != 0:
+                        fail += 1
+                        continue
                 else:
                     self.log(f"[{i}] ⚠ 未知 op: {op}")
                     fail += 1
@@ -440,6 +476,68 @@ class App:
                 self.log(f"[{i}] ❌ {path}: {e}")
                 fail += 1
         return ok, fail
+
+    # ================= 一键运行 =================
+    def run_oneclick(self):
+        threading.Thread(target=self._bg_oneclick, daemon=True).start()
+
+    def _bg_oneclick(self):
+        raw = self.ops_text.get("1.0", "end").strip()
+        if not raw:
+            return self.root.after(0, lambda: messagebox.showwarning("提示", "JSON 为空"))
+        try:
+            tasks = json.loads(raw)
+        except Exception as e:
+            self.log(f"[JSON 解析失败] {e}\n")
+            return
+        if not isinstance(tasks, list):
+            self.log("[错误] 顶层应为数组\n")
+            return
+
+        self.clear_log()
+
+        # ① 文件操作
+        self.set_status("① 文件操作...")
+        ok, fail = self._exec_tasks(tasks)
+        self.log(f"\n文件操作: {ok} 成功 / {fail} 失败\n\n")
+
+        # 找最后一个 write 的文件名
+        last_written = None
+        for t in tasks:
+            if t.get("op") == "write" and t.get("path"):
+                last_written = t.get("path")
+
+        if not last_written:
+            self.log("⚠ 没有 write 操作，跳过 Patch\n")
+            self.root.after(0, self._copy_silent)
+            self.set_status("文件操作完成（无 Patch），输出已复制")
+            return
+
+        name = os.path.basename(last_written)
+
+        # ② 切到 Patch tab、刷新、选中
+        self.set_status("② 切换到 Patch tab...")
+        def _switch():
+            self.nb.select(self.tab_patch)
+            self.refresh_patches()
+            values = self.patch_combo["values"] or ()
+            if name in values:
+                self.patch_var.set(name)
+        self.root.after(0, _switch)
+        time.sleep(0.15)
+
+        # ③ 运行 Patch
+        self.set_status(f"③ 运行 {name} ...")
+        if self.run_cmd(["node", name]) != 0:
+            self.log("❌ Patch 失败\n")
+            self.root.after(0, self._copy_silent)
+            self.set_status("Patch 失败，输出已复制")
+            return
+        self.log("✅ Patch 成功\n")
+
+        # ④ 复制输出
+        self.root.after(0, self._copy_silent)
+        self.set_status("🎉 一键运行完成，输出已复制到剪贴板")
 
     def run_ops_patch_check(self):
         name = self.patch_var.get().strip()

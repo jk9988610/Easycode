@@ -49,6 +49,7 @@ export interface AppSettings {
   sidebarWidth: number;
   showPanel: boolean;
   showRightSidebar: boolean;
+  rightbarWidth: number;
   panelHeight: number;
   panelView: PanelView;
   rightView: RightView;

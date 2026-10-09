@@ -22,6 +22,7 @@ export interface AppSettings {
   sidebarWidth: number;
   showPanel: boolean;
   showRightSidebar: boolean;
+  rightbarWidth: number;
   panelHeight: number;
   panelView: PanelView;
   rightView: RightView;
@@ -49,6 +50,7 @@ const DEFAULTS: AppSettings = {
   sidebarWidth: 260,
   showPanel: false,
   showRightSidebar: false,
+  rightbarWidth: 240,
   panelHeight: 220,
   panelView: "terminal",
   rightView: "info",
