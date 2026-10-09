@@ -1,8 +1,8 @@
 """CLI 入口。
 
-用法:
-  交互/调试(带彩色 stderr): python main.py "任务描述"
-  集成模式(纯 stdout JSONL): 主进程 spawn 时带 --json 参数即可(默认就是 JSONL)
+两种模式:
+  单次模式(默认):  python main.py "任务描述"
+  交互模式(长对话): python main.py --interactive
 
 输出契约:
   - stdout: 每行一个 JSON 事件(JSONL),GUI 集成时只需逐行读 stdout。
@@ -10,10 +10,15 @@
 """
 import sys
 
-from agent_loop import run_agent
+from agent_loop import run_agent, run_interactive
 
 
 def main() -> None:
+    if "--interactive" in sys.argv:
+        print("🟢 启动交互模式(stdin 发送 JSON 指令)", file=sys.stderr, flush=True)
+        run_interactive()
+        return
+
     if len(sys.argv) < 2:
         print(__doc__, file=sys.stderr)
         print(
@@ -21,8 +26,11 @@ def main() -> None:
             file=sys.stderr,
         )
         sys.exit(1)
-    task = " ".join(sys.argv[1:])
-    # 任务提示只写到 stderr,保持 stdout 纯 JSONL
+
+    task = " ".join(a for a in sys.argv[1:] if not a.startswith("-"))
+    if not task:
+        print("错误:缺少任务描述", file=sys.stderr)
+        sys.exit(1)
     print(f"📝 任务: {task}", file=sys.stderr, flush=True)
     run_agent(task)
 

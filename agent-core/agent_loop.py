@@ -1,9 +1,13 @@
 """Agent 循环(核心):指令 → 模型决定调工具 → 执行 → 结果回传 → 直到完成。
 
+两种运行模式:
+- 单次模式:run_agent(task) 执行一轮后返回,子进程退出。
+- 交互模式:run_interactive() 保持运行,从 stdin 逐行读取新指令,
+  在同一个 messages 列表上续写,实现多轮长对话。
+
 输出分离(便于 GUI 集成):
 - stdout: 每行一个 JSON 事件(JSONL),供主进程逐行解析转发给 UI。
 - stderr: 人类可读的彩色文本,供终端直接调试。
-两个流完全独立:主进程只需读 stdout,不会被装饰文本干扰。
 """
 import json
 import os
@@ -53,9 +57,7 @@ def _build_system_prompt() -> str:
 # ---------------------------------------------------------------------------
 # 结构化日志:stdout=JSONL(供解析)/ stderr=彩色(供调试)
 # ---------------------------------------------------------------------------
-# 事件类型:turn_start / thinking / tool_call / tool_result / final / stopped / error
 
-# ANSI 颜色码(Windows 10+ 终端支持)
 _C_RESET = "\033[0m"
 _C_DIM = "\033[2m"
 _C_CYAN = "\033[36m"
@@ -66,7 +68,6 @@ _C_BLUE = "\033[34m"
 
 
 def _pretty(event: dict) -> str:
-    """把结构化事件转成人类可读的彩色控制台文本(写到 stderr)。"""
     t = event["type"]
     if t == "turn_start":
         return f"\n{_C_DIM}--- 第 {event['turn']} 轮 ---{_C_RESET}"
@@ -82,32 +83,23 @@ def _pretty(event: dict) -> str:
         return f"\n{_C_YELLOW}⚠️ 达到最大轮次,已停止{_C_RESET}"
     if t == "error":
         return f"\n{_C_RED}❌ 错误:{_C_RESET} {event['message']}"
+    if t == "session_started":
+        return f"\n{_C_GREEN}🟢 会话已启动{_C_RESET}"
+    if t == "ready":
+        return f"\n{_C_GREEN}✅ 就绪,等待下一条指令{_C_RESET}"
     return ""
 
 
 def emit(event: dict) -> None:
-    """发出一个结构化事件。
-
-    - stdout: 紧凑 JSON(单行),供主进程逐行解析转发给渲染进程。
-    - stderr: 人类可读彩色文本,供直接终端调试时看。
-    两个流独立,互不污染。
-    """
+    """发出一个结构化事件。stdout=JSONL / stderr=彩色。"""
     event = {"ts": time.time(), **event}
-    # stdout: 机器可读 JSONL(供 Electron 主进程解析)
     print(json.dumps(event, ensure_ascii=False), flush=True)
-    # stderr: 人类可读彩色文本(flush 保证实时)
     line = _pretty(event)
     if line:
         print(line, file=sys.stderr, flush=True)
 
 
 def _pick_content(msg) -> str:
-    """提取模型的思考内容。
-
-    deepseek-chat 的"思考"就是伴随工具调用产生的 msg.content;
-    deepseek-reasoner 才有独立的 reasoning_content(但它不支持 function calling)。
-    两者都做兼容,优先 reasoning_content,其次 content。
-    """
     reasoning = getattr(msg, "reasoning_content", None)
     if reasoning:
         return reasoning
@@ -115,18 +107,22 @@ def _pick_content(msg) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Agent 主循环
+# 对话上下文管理
 # ---------------------------------------------------------------------------
 
 
-def run_agent(user_input: str, max_turns: int = MAX_TURNS) -> str | None:
-    messages = [
-        {"role": "system", "content": _build_system_prompt()},
-        {"role": "user", "content": user_input},
-    ]
+def _new_messages() -> list:
+    """创建带 system prompt 的消息列表。"""
+    return [{"role": "system", "content": _build_system_prompt()}]
 
-    for turn in range(1, max_turns + 1):
-        emit({"type": "turn_start", "turn": turn})
+
+def _run_turn(messages: list, turn: int) -> str | None:
+    """执行一轮对话(可能包含多次工具调用),返回最终文字或 None。
+
+    messages 列表会被就地追加(user / assistant / tool 消息)。
+    """
+    for sub_turn in range(turn, turn + MAX_TURNS):
+        emit({"type": "turn_start", "turn": sub_turn})
         try:
             response = client.chat.completions.create(
                 model=MODEL,
@@ -134,27 +130,24 @@ def run_agent(user_input: str, max_turns: int = MAX_TURNS) -> str | None:
                 tools=TOOLS,
             )
         except Exception as e:
-            emit({"type": "error", "turn": turn, "message": str(e)})
+            emit({"type": "error", "turn": sub_turn, "message": str(e)})
             raise
 
         msg = response.choices[0].message
         messages.append(msg)
 
-        # 打印思考内容(deepseek-chat 的工具调用常附带一段解释,以前被丢弃了)
         thinking = _pick_content(msg)
         if thinking:
-            emit({"type": "thinking", "turn": turn, "content": thinking})
+            emit({"type": "thinking", "turn": sub_turn, "content": thinking})
 
-        # 没有工具调用 → 模型给出最终回答,结束
         if not msg.tool_calls:
-            emit({"type": "final", "turn": turn, "content": thinking or "(无文字回复)"})
+            emit({"type": "final", "turn": sub_turn, "content": thinking or "(无文字回复)"})
             return msg.content
 
-        # 有工具调用 → 逐个执行,把结果回传给模型
         for tool_call in msg.tool_calls:
             func_name = tool_call.function.name
             raw_args = tool_call.function.arguments
-            emit({"type": "tool_call", "turn": turn, "id": tool_call.id,
+            emit({"type": "tool_call", "turn": sub_turn, "id": tool_call.id,
                   "name": func_name, "arguments": raw_args})
 
             try:
@@ -171,7 +164,7 @@ def run_agent(user_input: str, max_turns: int = MAX_TURNS) -> str | None:
                         result = f"[错误] 参数不匹配: {e}"
             result = str(result)
 
-            emit({"type": "tool_result", "turn": turn, "id": tool_call.id,
+            emit({"type": "tool_result", "turn": sub_turn, "id": tool_call.id,
                   "name": func_name, "result": result})
 
             messages.append(
@@ -182,5 +175,66 @@ def run_agent(user_input: str, max_turns: int = MAX_TURNS) -> str | None:
                 }
             )
 
-    emit({"type": "stopped", "turn": max_turns})
+    emit({"type": "stopped", "turn": turn + MAX_TURNS})
     return None
+
+
+# ---------------------------------------------------------------------------
+# 单次模式 / 交互模式
+# ---------------------------------------------------------------------------
+
+
+def run_agent(user_input: str, max_turns: int = MAX_TURNS) -> str | None:
+    """单次模式:执行一个任务后返回。"""
+    messages = _new_messages()
+    messages.append({"role": "user", "content": user_input})
+    return _run_turn(messages, 1)
+
+
+def run_interactive() -> None:
+    """交互模式:保持运行,从 stdin 逐行读取指令,在同一 messages 上续写。
+
+    协议:
+      - stdin 每行一个 JSON: {"type":"send","content":"用户消息"}
+                          或 {"type":"clear"} 清空对话历史
+                          或 {"type":"exit"} 退出
+      - stdout 照常输出 JSONL 事件流(与单次模式相同)
+      - 每轮结束后发 {"type":"ready"} 表示可接收下一条指令
+    """
+    messages = _new_messages()
+    emit({"type": "session_started"})
+
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            cmd = json.loads(line)
+        except json.JSONDecodeError as e:
+            emit({"type": "error", "message": f"stdin 非 JSON: {e}"})
+            continue
+
+        ctype = cmd.get("type", "")
+        if ctype == "exit":
+            break
+        if ctype == "clear":
+            messages = _new_messages()
+            emit({"type": "ready"})
+            continue
+        if ctype != "send":
+            emit({"type": "error", "message": f"未知指令类型: {ctype}"})
+            continue
+
+        content = cmd.get("content", "").strip()
+        if not content:
+            emit({"type": "ready"})
+            continue
+
+        messages.append({"role": "user", "content": content})
+        try:
+            _run_turn(messages, 1)
+        except Exception:
+            pass  # 错误已通过 emit 发出,不退出会话
+        emit({"type": "ready"})
+
+    emit({"type": "final", "content": "(会话结束)"})

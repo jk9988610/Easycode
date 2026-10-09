@@ -154,9 +154,12 @@ const api = {
   termResize: (id: string, cols: number, rows: number) =>
     ipcRenderer.invoke("term:resize", id, cols, rows),
   termKill: (id: string) => ipcRenderer.invoke("term:kill", id),
-  // Agent (agent-core Python 子进程)
-  agentRun: (task: string): Promise<string> =>
-    ipcRenderer.invoke("agent:run", task),
+  // Agent (agent-core Python 子进程,交互式长对话)
+  agentStart: (): Promise<string> => ipcRenderer.invoke("agent:start"),
+  agentSend: (id: string, content: string): Promise<void> =>
+    ipcRenderer.invoke("agent:send", id, content),
+  agentClear: (id: string): Promise<void> =>
+    ipcRenderer.invoke("agent:clear", id),
   agentStop: (id: string): Promise<void> =>
     ipcRenderer.invoke("agent:stop", id),
   agentList: () => ipcRenderer.invoke("agent:list"),

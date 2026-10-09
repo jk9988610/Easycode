@@ -4,6 +4,7 @@ import os from "node:os";
 import AdmZip from "adm-zip";
 import type { AppSettings } from "./settings";
 import type { LanguageServerSpec } from "./languageServer";
+import { getBuiltinLanguageServers } from "./builtinServers";
 
 export interface LanguageServerContribution {
   id: string;
@@ -174,6 +175,8 @@ export class PluginHost {
 
   resolveLanguageServers(): LanguageServerSpec[] {
     const out: LanguageServerSpec[] = [];
+
+    // 1. 扩展贡献的语言服务器
     for (const plugin of this.list()) {
       if (!plugin.enabled) continue;
       const servers = plugin.contributes?.languageServers || [];
@@ -189,6 +192,14 @@ export class PluginHost {
         });
       }
     }
+
+    // 2. 内置语言服务器(clangd / tsserver / pyright)— 扩展未覆盖的语言才追加
+    const extLangs = new Set(out.flatMap((s) => s.languages || []));
+    for (const spec of getBuiltinLanguageServers()) {
+      const hasOverlap = (spec.languages || []).some((l) => extLangs.has(l));
+      if (!hasOverlap) out.push(spec);
+    }
+
     return out;
   }
 

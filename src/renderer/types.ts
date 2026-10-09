@@ -91,7 +91,9 @@ export interface AgentEventPayload {
     | "tool_result"
     | "final"
     | "stopped"
-    | "error";
+    | "error"
+    | "session_started"
+    | "ready";
   turn?: number;
   content?: string;
   name?: string;
@@ -187,8 +189,10 @@ export interface EasycodeApi {
   termWrite: (id: string, data: string) => Promise<void>;
   termResize: (id: string, cols: number, rows: number) => Promise<void>;
   termKill: (id: string) => Promise<void>;
-  // Agent (agent-core Python 子进程)
-  agentRun: (task: string) => Promise<string>;
+  // Agent (agent-core Python 子进程,交互式长对话)
+  agentStart: () => Promise<string>;
+  agentSend: (id: string, content: string) => Promise<void>;
+  agentClear: (id: string) => Promise<void>;
   agentStop: (id: string) => Promise<void>;
   agentList: () => Promise<{ id: string; cwd: string }[]>;
   onAgentEvent: (

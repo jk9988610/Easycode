@@ -251,14 +251,20 @@ function registerIpc(): void {
     terminalHost?.kill(id);
   });
 
-  // --- Agent (agent-core Python 子进程) ---
-  ipcMain.handle("agent:run", (_e, task: string) => {
+  // --- Agent (agent-core Python 子进程,交互式长对话) ---
+  ipcMain.handle("agent:start", () => {
     if (!agentHost) throw new Error("agent host 未初始化");
     const apiKey = settings.agentApiKey;
     if (!apiKey) throw new Error("未配置 DeepSeek API Key,请在设置中填写");
     const cwd = settings.lastWorkspace;
     if (!cwd || !fs.existsSync(cwd)) throw new Error("未打开工作区,无法启动 agent");
-    return agentHost.run(task, { cwd, apiKey });
+    return agentHost.startSession({ cwd, apiKey });
+  });
+  ipcMain.handle("agent:send", (_e, id: string, content: string) => {
+    agentHost?.send(id, content);
+  });
+  ipcMain.handle("agent:clear", (_e, id: string) => {
+    agentHost?.clear(id);
   });
   ipcMain.handle("agent:stop", (_e, id: string) => {
     agentHost?.stop(id);

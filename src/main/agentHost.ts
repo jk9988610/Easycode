@@ -1,21 +1,35 @@
 /**
  * AgentHost — 在主进程中管理 agent-core Python 子进程的生命周期。
  *
- * 每个"对话"对应一个子进程。主进程 spawn `python main.py "<task>"`,
- * 逐行读 stdout(JSONL 事件)转发给渲染进程,stderr(彩色日志)写入可选日志。
+ * 支持两种模式:
+ * 1. 单次模式:run(task) spawn 后等子进程自己结束。
+ * 2. 交互模式(长对话):startSession() 启动 `python main.py --interactive`,
+ *    保持子进程存活;send(sessionId, message) 通过 stdin 发新指令,
+ *    clear(sessionId) 清空历史,stop(sessionId) 终止。
  *
  * 事件流:
- *   渲染进程 ──agent:run──> 主进程 spawn python ──stdout──> 逐行解析 JSON
- *        └<──agent:event── 主进程转发事件 ──stderr──> 可选写入日志文件
- *   渲染进程 ──agent:stop──> 主进程 kill 子进程
+ *   渲染进程 ──agent:start──> spawn python --interactive ──stdout──> 逐行解析 JSON
+ *        └<──agent:event── 主进程转发事件
+ *   渲染进程 ──agent:send──> stdin.write({"type":"send","content":"..."})
+ *   渲染进程 ──agent:clear──> stdin.write({"type":"clear"})
+ *   渲染进程 ──agent:stop──> kill 子进程
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
-import { app } from "electron";
+import { resolvePython, resolveAgentCoreDir } from "./pythonRuntime";
 
 export interface AgentEvent {
   ts: number;
-  type: "turn_start" | "thinking" | "tool_call" | "tool_result" | "final" | "stopped" | "error";
+  type:
+    | "turn_start"
+    | "thinking"
+    | "tool_call"
+    | "tool_result"
+    | "final"
+    | "stopped"
+    | "error"
+    | "session_started"
+    | "ready";
   turn?: number;
   content?: string;
   name?: string;
@@ -32,19 +46,20 @@ interface Session {
   id: string;
   proc: ChildProcess;
   cwd: string;
+  interactive: boolean;
 }
 
-/** agent-core 目录的绝对路径(开发期指向源码,打包后指向 dist 下副本)。 */
-function resolveAgentCoreDir(): string {
-  // 开发环境:源码在项目根 agent-core/
-  const devPath = path.join(app.getAppPath(), "agent-core");
-  return devPath;
+/** agent-core 目录的绝对路径(兼容开发态与打包态)。 */
+function requireAgentCoreDir(): string {
+  const dir = resolveAgentCoreDir();
+  if (!dir) {
+    throw new Error(
+      "未找到 agent-core 目录(缺少 main.py)。打包版本需确保 agent-core 已复制到 resources 目录。",
+    );
+  }
+  return dir;
 }
 
-/**
- * 管理 agent-core 子进程。同一时间可以有多个对话,
- * 每个对话一个独立子进程,互不干扰。
- */
 export class AgentHost {
   private sessions = new Map<string, Session>();
   private seq = 1;
@@ -57,15 +72,19 @@ export class AgentHost {
   }
 
   /**
-   * 启动一次 agent 对话。
-   *
-   * @param task  用户输入的任务描述
-   * @param opts  cwd=工作区目录, apiKey=DeepSeek API key
-   * @returns     会话 id(渲染进程用它来关联事件流)
+   * 启动一个交互式会话(长对话模式)。
+   * 子进程保持运行,通过 stdin 接收后续指令。
    */
-  run(task: string, opts: { cwd: string; apiKey: string; model?: string }): string {
+  startSession(opts: { cwd: string; apiKey: string; model?: string }): string {
+    const python = resolvePython();
+    if (!python) {
+      throw new Error(
+        "未找到可用的 Python 解释器。请安装 Python 3 并加入 PATH,或在设置中指定解释器路径(EASYCODE_PYTHON)。",
+      );
+    }
+
     const id = `agent-${this.seq++}`;
-    const agentDir = resolveAgentCoreDir();
+    const agentDir = requireAgentCoreDir();
     const script = path.join(agentDir, "main.py");
 
     const env: Record<string, string> = {
@@ -73,28 +92,75 @@ export class AgentHost {
       DEEPSEEK_API_KEY: opts.apiKey,
       PYTHONIOENCODING: "utf-8",
       PYTHONUTF8: "1",
-      // agent 的工作区围栏 = 当前打开的工作区
       AGENT_WORKSPACE: opts.cwd,
     };
     if (opts.model) env.DEEPSEEK_MODEL = opts.model;
 
-    const proc = spawn("python", [script, task], {
+    // stdin 必须是 pipe(交互模式需要写入 stdin)
+    const proc = spawn(python.command, [...python.args, script, "--interactive"], {
       cwd: opts.cwd,
       env,
       windowsHide: true,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
 
-    const session: Session = { id, proc, cwd: opts.cwd };
+    const session: Session = { id, proc, cwd: opts.cwd, interactive: true };
     this.sessions.set(id, session);
+    this.attachStreams(id, proc);
 
+    return id;
+  }
+
+  /**
+   * 向交互式会话发送一条消息。
+   */
+  send(id: string, content: string): void {
+    const s = this.sessions.get(id);
+    if (!s || !s.interactive) throw new Error(`会话 ${id} 不存在或不是交互模式`);
+    const cmd = JSON.stringify({ type: "send", content }) + "\n";
+    s.proc.stdin?.write(cmd, "utf-8");
+  }
+
+  /**
+   * 清空交互式会话的对话历史(不终止进程)。
+   */
+  clear(id: string): void {
+    const s = this.sessions.get(id);
+    if (!s || !s.interactive) throw new Error(`会话 ${id} 不存在或不是交互模式`);
+    s.proc.stdin?.write(JSON.stringify({ type: "clear" }) + "\n", "utf-8");
+  }
+
+  /** 终止指定会话的子进程。 */
+  stop(id: string): void {
+    const s = this.sessions.get(id);
+    if (!s) return;
+    // 交互模式:先发 exit 指令优雅退出,再兜底 kill
+    if (s.interactive) {
+      try {
+        s.proc.stdin?.write(JSON.stringify({ type: "exit" }) + "\n", "utf-8");
+      } catch {
+        /* ignore */
+      }
+    }
+    try {
+      s.proc.kill();
+    } catch {
+      /* ignore */
+    }
+    this.sessions.delete(id);
+  }
+
+  dispose(): void {
+    for (const id of [...this.sessions.keys()]) this.stop(id);
+  }
+
+  private attachStreams(id: string, proc: ChildProcess): void {
     // stdout: 逐行读 JSONL 事件
     let stdoutBuf = "";
-    proc.stdout.setEncoding("utf-8");
-    proc.stdout.on("data", (chunk: string) => {
+    proc.stdout?.setEncoding("utf-8");
+    proc.stdout?.on("data", (chunk: string) => {
       stdoutBuf += chunk;
       const lines = stdoutBuf.split("\n");
-      // 最后一段可能不完整,保留
       stdoutBuf = lines.pop() || "";
       for (const line of lines) {
         const trimmed = line.trim();
@@ -103,14 +169,11 @@ export class AgentHost {
       }
     });
 
-    // stderr: 彩色日志,直接整块转发给渲染进程(可选展示)
-    proc.stderr.setEncoding("utf-8");
-    proc.stderr.on("data", (chunk: string) => {
-      this.onEvent(id, {
-        ts: Date.now() / 1000,
-        type: "error",
-        message: chunk,
-      });
+    // stderr: 彩色日志,转发给渲染进程
+    proc.stderr?.setEncoding("utf-8");
+    proc.stderr?.on("data", (chunk: string) => {
+      // stderr 只有调试文本,不转发给 UI(避免噪声)
+      // 仅在开发时控制台可见
     });
 
     proc.on("exit", (code) => {
@@ -127,25 +190,6 @@ export class AgentHost {
       this.sessions.delete(id);
       this.onExit(id, -1);
     });
-
-    return id;
-  }
-
-  /** 终止指定对话的子进程。 */
-  stop(id: string): void {
-    const s = this.sessions.get(id);
-    if (!s) return;
-    try {
-      s.proc.kill();
-    } catch {
-      /* ignore */
-    }
-    this.sessions.delete(id);
-  }
-
-  /** 终止所有对话。 */
-  dispose(): void {
-    for (const id of [...this.sessions.keys()]) this.stop(id);
   }
 
   private parseAndForward(id: string, line: string): void {
@@ -153,7 +197,6 @@ export class AgentHost {
       const event = JSON.parse(line) as AgentEvent;
       this.onEvent(id, event);
     } catch {
-      // 非 JSON 行(stderr 偶尔混入 stdout 或模型输出异常),包装成 error 事件
       this.onEvent(id, {
         ts: Date.now() / 1000,
         type: "error",

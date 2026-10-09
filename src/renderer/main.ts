@@ -732,6 +732,7 @@ class App {
                   <div class="panel-view" id="panel-output" hidden></div>
                   <div class="panel-view" id="panel-debug" hidden></div>
                   <div class="panel-view" id="term-host" hidden></div>
+                  <div class="term-sidebar" id="term-sidebar" hidden></div>
                 </div>
               </div>
             </div>
@@ -765,6 +766,8 @@ class App {
         // 切换到当前活动终端可见
         const activeId = (this.terminalPanel as any).activeId;
         if (activeId) this.terminalPanel.activate(activeId);
+        // 重新渲染终端侧栏(恢复 term-host 的 right 偏移)
+        this.renderTermSidebar();
       }
     }
     this.renderStatus();
@@ -1778,9 +1781,10 @@ class App {
       : `<div class="chat-empty">开始新的对话</div>`;
     const apiKeyOk = !!this.settings.agentApiKey;
     const placeholder = apiKeyOk
-      ? "描述任务,例如:给 utils.py 的 add 函数加上类型检查,然后运行测试"
+      ? "描述任务,支持多轮对话。例如:读取 main.ts,然后给它加注释"
       : "请先在设置中填写 DeepSeek API Key";
     const disabled = !apiKeyOk || this.chatRunning;
+    const hasHistory = this.chatMessages.length > 0;
     return `
       <div class="chat-pane">
         <div class="chat-stream" data-chat-stream>
@@ -1791,6 +1795,10 @@ class App {
             disabled ? "disabled" : ""
           } data-chat-input></textarea>
           <div class="chat-composer-bar">
+            <button type="button" data-chat-clear title="清空对话"${
+              hasHistory || this.chatSessionId ? "" : " disabled"
+            }>清空</button>
+            <div class="spacer"></div>
             ${
               this.chatRunning
                 ? '<button type="button" data-chat-stop>停止</button>'
@@ -1831,8 +1839,10 @@ class App {
     const input = body.querySelector("[data-chat-input]") as HTMLTextAreaElement | null;
     const sendBtn = body.querySelector("[data-chat-send]");
     const stopBtn = body.querySelector("[data-chat-stop]");
+    const clearBtn = body.querySelector("[data-chat-clear]");
     sendBtn?.addEventListener("click", () => this.sendChatMessage());
     stopBtn?.addEventListener("click", () => this.stopChat());
+    clearBtn?.addEventListener("click", () => void this.clearChat());
     input?.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
@@ -1853,13 +1863,19 @@ class App {
     if (!input) return;
     const task = input.value.trim();
     if (!task || this.chatRunning) return;
-    // 显示用户消息
-    this.chatMessages.push({ ts: Date.now(), kind: "final", text: `📝 ${task}` });
     input.value = "";
     this.chatRunning = true;
+
+    // 显示用户消息
+    this.chatMessages.push({ ts: Date.now(), kind: "final", text: `📝 ${task}` });
     this.renderRightbar();
+
     try {
-      this.chatSessionId = await window.easycode.agentRun(task);
+      if (!this.chatSessionId) {
+        // 首条消息:启动交互式会话,会话就绪后自动发送
+        this.chatSessionId = await window.easycode.agentStart();
+      }
+      await window.easycode.agentSend(this.chatSessionId, task);
     } catch (e) {
       this.chatMessages.push({
         ts: Date.now(),
@@ -1867,7 +1883,17 @@ class App {
         text: e instanceof Error ? e.message : String(e),
       });
       this.chatRunning = false;
+      this.chatSessionId = null;
     }
+    this.renderRightbar();
+  }
+
+  private async clearChat(): Promise<void> {
+    if (this.chatSessionId) {
+      await window.easycode.agentClear(this.chatSessionId);
+    }
+    this.chatMessages = [];
+    this.chatRunning = false;
     this.renderRightbar();
   }
 
@@ -1879,9 +1905,17 @@ class App {
   }
 
   private handleAgentEvent(data: AgentEventPayload): void {
+    // session_started / ready: 不显示为消息,只控制状态
+    if (data.type === "session_started") return;
+    if (data.type === "ready") {
+      this.chatRunning = false;
+      return;
+    }
+    if (data.type === "turn_start") return; // 不显示轮次标记
+
     const m: ChatMessage = {
       ts: data.ts * 1000,
-      kind: data.type === "turn_start" ? "thinking" : (data.type as ChatMessage["kind"]),
+      kind: data.type as ChatMessage["kind"],
       turn: data.turn,
       text: data.content,
       toolName: data.name,
@@ -1889,10 +1923,8 @@ class App {
       toolResult: data.result,
       message: data.message,
     };
-    if (data.type === "turn_start") return; // 不显示轮次标记,保持消息流紧凑
     if (data.type === "final") {
       this.chatRunning = false;
-      this.chatSessionId = null;
     }
     this.chatMessages.push(m);
     this.renderRightbar();
@@ -1966,6 +1998,12 @@ class App {
       } else {
         this.terminalPanel?.layout();
       }
+    } else {
+      // 非终端视图:隐藏侧栏,重置 term-host 宽度
+      const sidebar = this.root.querySelector("#term-sidebar") as HTMLElement | null;
+      const termHost = this.root.querySelector("#term-host") as HTMLElement | null;
+      if (sidebar) sidebar.hidden = true;
+      if (termHost) termHost.style.right = "0";
     }
   }
 
@@ -1983,6 +2021,8 @@ class App {
     const termTabs =
       panelView === "terminal" && this.terminalPanel ? this.terminalPanel.getTabs() : [];
     const activeTerm = termTabs.find((t) => t.active);
+
+    // 面板顶栏:视图切换 + 新建终端按钮(标签移到右侧栏)
     el.innerHTML = `
       <div class="panel-views">
         ${views
@@ -1996,23 +2036,14 @@ class App {
       </div>
       ${
         panelView === "terminal"
-          ? `<div class="term-tabs-inline">
-              ${termTabs
-                .map(
-                  (t) =>
-                    `<button type="button" class="term-tab ${t.active ? "active" : ""}" data-term="${escapeAttr(
-                      t.id,
-                    )}">${escapeHtml(t.title)}</button>`,
-                )
-                .join("")}
-              <div class="spacer"></div>
+          ? `<div class="panel-chrome-right">
               ${
                 activeTerm
-                  ? `<button type="button" data-act="kill-term" title="关闭终端">×</button>`
+                  ? `<button type="button" data-act="kill-term" title="关闭当前终端">×</button>`
                   : ""
               }
               <div class="term-menu panel-new">
-                <button type="button" data-act="new-term">+</button>
+                <button type="button" data-act="new-term" title="新建终端">+</button>
                 <div class="drop">
                   <button type="button" data-shell="powershell">PowerShell</button>
                   <button type="button" data-shell="cmd">CMD</button>
@@ -2028,16 +2059,12 @@ class App {
         void this.setPanelView(btn.getAttribute("data-panel") as PanelView);
       });
     });
-    el.querySelectorAll<HTMLElement>("[data-term]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        this.terminalPanel?.activate(btn.getAttribute("data-term")!);
-        this.renderPanelChrome();
-      });
-    });
     el.querySelector('[data-act="kill-term"]')?.addEventListener("click", async () => {
       if (!activeTerm) return;
       await this.terminalPanel?.close(activeTerm.id);
       this.renderPanelChrome();
+      this.renderTermSidebar();
+      this.terminalPanel?.layout();
     });
     const newMenu = el.querySelector(".panel-new") as HTMLElement | null;
     el.querySelector('[data-act="new-term"]')?.addEventListener("click", (e) => {
@@ -2047,7 +2074,72 @@ class App {
     newMenu?.querySelectorAll<HTMLButtonElement>("[data-shell]").forEach((btn) => {
       btn.addEventListener("click", () => {
         newMenu.classList.remove("open");
-        void this.openTerminal(btn.getAttribute("data-shell") as ShellKind);
+        void this.openTerminal(btn.getAttribute("data-shell") as ShellKind).then(() => {
+          this.renderTermSidebar();
+          this.terminalPanel?.layout();
+        });
+      });
+    });
+
+    // 渲染右侧终端标签栏
+    this.renderTermSidebar();
+  }
+
+  /** 渲染终端面板右侧的标签栏(2+ 终端时显示) */
+  private renderTermSidebar(): void {
+    const sidebar = this.root.querySelector("#term-sidebar") as HTMLElement | null;
+    const termHost = this.root.querySelector("#term-host") as HTMLElement | null;
+    if (!sidebar || !termHost) return;
+
+    const isTerminal = this.settings.panelView === "terminal";
+    const tabs = isTerminal && this.terminalPanel ? this.terminalPanel.getTabs() : [];
+    const showSidebar = isTerminal && tabs.length >= 2;
+
+    if (!showSidebar) {
+      sidebar.hidden = true;
+      sidebar.removeAttribute("data-visible");
+      termHost.style.right = "0";
+      return;
+    }
+
+    sidebar.hidden = false;
+    sidebar.setAttribute("data-visible", "");
+    termHost.style.right = "160px"; // 给侧栏腾出空间
+
+    const activeTab = tabs.find((t) => t.active);
+    sidebar.innerHTML = `
+      <div class="term-sidebar-header">
+        <span>终端</span>
+      </div>
+      <div class="term-sidebar-list">
+        ${tabs
+          .map(
+            (t) => `
+            <div class="term-sidebar-item ${t.active ? "active" : ""}" data-term="${escapeAttr(t.id)}">
+              <span class="term-sidebar-icon">${t.title === "PowerShell" || t.title === "pwsh" ? "❯" : t.title === "cmd" ? "▣" : "$"}</span>
+              <span class="term-sidebar-label">${escapeHtml(t.title)}</span>
+              <button type="button" class="term-sidebar-close" data-kill="${escapeAttr(t.id)}" title="关闭">×</button>
+            </div>`,
+          )
+          .join("")}
+      </div>
+    `;
+
+    sidebar.querySelectorAll<HTMLElement>("[data-term]").forEach((item) => {
+      item.addEventListener("click", (e) => {
+        if ((e.target as HTMLElement).hasAttribute("data-kill")) return;
+        this.terminalPanel?.activate(item.getAttribute("data-term")!);
+        this.renderPanelChrome();
+      });
+    });
+    sidebar.querySelectorAll<HTMLElement>("[data-kill]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const id = btn.getAttribute("data-kill")!;
+        void this.terminalPanel?.close(id).then(() => {
+          this.renderPanelChrome();
+          this.terminalPanel?.layout();
+        });
       });
     });
   }

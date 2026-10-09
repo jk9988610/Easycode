@@ -10,7 +10,7 @@ const shared = {
   platform: "node",
   target: "node18",
   sourcemap: true,
-  external: ["electron", "iconv-lite", "jschardet", "adm-zip", "node-pty"],
+  external: ["electron", "iconv-lite", "jschardet", "adm-zip", "@homebridge/node-pty-prebuilt-multiarch"],
   logLevel: "info",
 };
 
@@ -31,7 +31,7 @@ async function run() {
 
   if (watch) {
     await Promise.all([mainCtx.watch(), preloadCtx.watch()]);
-    console.log("[electron-build] watching…");
+    console.log('[electron-build] watching...');
   } else {
     await Promise.all([mainCtx.rebuild(), preloadCtx.rebuild()]);
     await mainCtx.dispose();

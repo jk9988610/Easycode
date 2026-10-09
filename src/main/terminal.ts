@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import * as pty from "node-pty";
+import * as pty from "@homebridge/node-pty-prebuilt-multiarch";
 
 export type ShellKind = "powershell" | "cmd" | "gitbash";
 
@@ -25,7 +25,7 @@ interface Session {
  * Terminal host backed by node-pty (real PTY / ConPTY on Windows).
  *
  * Unlike raw child_process with pipe stdio, a PTY makes the shell think
- * it's connected to a real terminal — so prompts appear, colors work,
+ * it's connected to a real terminal ?so prompts appear, colors work,
  * and Enter/cursor keys are handled correctly by the shell itself.
  */
 export class TerminalHost {
@@ -52,10 +52,8 @@ export class TerminalHost {
     const workDir =
       cwd && fs.existsSync(cwd) ? cwd : process.env.USERPROFILE || os.homedir();
     const { file, args, title } = resolveShell(kind);
-
-    // Windows PowerShell 5.1 在 ConPTY 模式下会挂起(已知兼容性问题),
-    // 对 PowerShell 回退到 WinPTY;cmd/bash 用 ConPTY。
     const useConpty = kind !== "powershell";
+
 
     const proc = pty.spawn(file, args, {
       name: "xterm-256color",
@@ -101,7 +99,7 @@ export class TerminalHost {
     try {
       s.proc.resize(cols, rows);
     } catch {
-      /* ignore — resize before spawn completes */
+      /* ignore ?resize before spawn completes */
     }
   }
 
@@ -146,9 +144,14 @@ function resolveShell(kind: ShellKind): { file: string; args: string[]; title: s
       }) || "bash.exe";
     return { file, args: ["--login", "-i"], title: "Git Bash" };
   }
-  // powershell — prefer pwsh (7+) then Windows PowerShell 5.1
-  const pwsh = [
-    "pwsh.exe",
+  const pwshCandidates = [
+    process.env.PROGRAMFILES
+      ? path.join(process.env.PROGRAMFILES, "PowerShell", "7", "pwsh.exe")
+      : "",
+    process.env["ProgramFiles(x86)"]
+      ? path.join(process.env["ProgramFiles(x86)"], "PowerShell", "7", "pwsh.exe")
+      : "",
+    // Windows PowerShell 5.1: standard location under System32
     path.join(
       process.env.SystemRoot || "C:\\Windows",
       "System32",
@@ -156,18 +159,19 @@ function resolveShell(kind: ShellKind): { file: string; args: string[]; title: s
       "v1.0",
       "powershell.exe",
     ),
-    "powershell.exe",
-  ];
-  const file = pwsh.find((p) => {
-    try {
-      return p === "powershell.exe" || p === "pwsh.exe" || fs.existsSync(p);
-    } catch {
-      return false;
-    }
-  })!;
+  ].filter(Boolean);
+  const file =
+    pwshCandidates.find((p) => {
+      try {
+        return fs.existsSync(p);
+      } catch {
+        return false;
+      }
+    }) || pwshCandidates[pwshCandidates.length - 1];
+  const isPwsh7 = file.toLowerCase().includes("powershell\\7\\pwsh.exe");
   return {
     file,
     args: ["-NoLogo"],
-    title: file === "pwsh.exe" ? "pwsh" : "PowerShell",
+    title: isPwsh7 ? "pwsh" : "PowerShell",
   };
 }
