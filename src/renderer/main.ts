@@ -1673,6 +1673,8 @@ class App {
     } catch {
       /* ignore */
     }
+    const t = this.activeTab();
+    if (t) setTimeout(() => void this.updateOverviewRuler(t), 80);
   }
 
   private renderTabs(): void {
@@ -1804,6 +1806,8 @@ class App {
 
   private async updateOverviewRuler(tab: EditorTab): Promise<void> {
     if (!this.editor || tab.kind === "diff") return;
+    await new Promise((r) => setTimeout(r, 80));
+    if (!this.editor || this.activeTab()?.id !== tab.id) return;
     if (!this.workspace) {
       if (this.editorDecorations.length) {
         this.editorDecorations = this.editor.deltaDecorations(this.editorDecorations, []);
