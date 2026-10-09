@@ -45,6 +45,47 @@ def _find_node_exe():
             pass
     raise RuntimeError("Cannot find node.exe. Install Node.js or set NODE_EXE env var.")
 
+def _resolve_exe(name):
+    import os as _os
+    if name == "node":
+        try:
+            return _find_node_exe()
+        except RuntimeError:
+            return name
+    if name in ("npm", "npm.cmd", "npx", "npx.cmd"):
+        try:
+            np = _find_node_exe()
+        except RuntimeError:
+            return name
+        base = _os.path.dirname(np)
+        target = _os.path.join(base, name if name.endswith(".cmd") else name + ".cmd")
+        if _os.path.exists(target):
+            return target
+        return name
+    if name in ("tsc", "tsc.cmd"):
+        local = _os.path.join(ROOT, "node_modules", ".bin", "tsc.cmd")
+        if _os.path.exists(local):
+            return local
+        return name
+    return name
+
+
+def _rewrite_shell_cmd(cmd):
+    if not cmd:
+        return cmd
+    parts = cmd.split(None, 1)
+    if not parts:
+        return cmd
+    first = parts[0]
+    resolved = _resolve_exe(first)
+    if resolved != first:
+        if " " in resolved:
+            resolved = chr(34) + resolved + chr(34)
+        if len(parts) == 2:
+            return resolved + " " + parts[1]
+        return resolved
+    return cmd
+
 
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
@@ -176,6 +217,8 @@ class App:
         self.patch_combo.pack(side="left", padx=(0, 6))
         ttk.Button(f1, text="🔄 刷新", command=self.refresh_patches, width=8).pack(side="left", padx=2)
         ttk.Button(f1, text="▶ 运行 Patch", command=self.run_patch, width=12).pack(side="left", padx=2)
+        self.auto_tc_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(f1, text="patch 后自动 typecheck", variable=self.auto_tc_var).pack(side="left", padx=8)
         ttk.Button(f1, text="🔍 Typecheck", command=self.run_typecheck, width=12).pack(side="left", padx=2)
 
         f2 = ttk.LabelFrame(self.tab_patch, text="② 提交", padding=10)
@@ -258,8 +301,16 @@ class App:
     # ================= 通用 =================
     def log(self, text):
         def _do():
-            self.output.insert("end", text)
-            if not text.endswith("\n"):
+            out = text
+            # filter CRLF warnings
+            if "warning: LF will be replaced" in out or "warning: in the working copy" in out:
+                _lines = out.split(chr(10))
+                _lines = [l for l in _lines if "warning: LF will be replaced" not in l and "warning: in the working copy" not in l]
+                out = chr(10).join(_lines)
+                if not out.strip():
+                    return
+            self.output.insert("end", out)
+            if not out.endswith("\n"):
                 self.output.insert("end", "\n")
             self.output.see("end")
         self.root.after(0, _do)
@@ -431,6 +482,8 @@ class App:
             self._auto_copy_after_run = False
             self.root.after(80, self._copy_silent)
             self.set_status("patch 完成，输出已复制到剪贴板")
+        if getattr(self, "auto_tc_var", None) is not None and self.auto_tc_var.get():
+            self.root.after(200, self.run_typecheck)
 
     def run_typecheck(self):
         threading.Thread(target=self._bg_typecheck, daemon=True).start()
@@ -609,6 +662,7 @@ class App:
                     cmd = t.get("cmd", "")
                     if not cmd:
                         raise ValueError("empty cmd")
+                    cmd = _rewrite_shell_cmd(cmd)
                     self.log(f"[{i}] shell  $ {cmd}")
                     sp = subprocess.run(
                         cmd, cwd=ROOT, shell=True, capture_output=True,
