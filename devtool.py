@@ -551,6 +551,7 @@ class App:
         threading.Thread(target=self._bg_file_ops, daemon=True).start()
 
     def _bg_file_ops(self):
+        self.clear_log()  # bg_file_ops_clear_log_fixed
         raw = self.ops_text.get("1.0", "end").strip()
         if not raw:
             return self.root.after(0, lambda: messagebox.showwarning("提示", "JSON 为空"))

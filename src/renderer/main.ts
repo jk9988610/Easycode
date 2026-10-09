@@ -79,6 +79,9 @@ class App {
   private chatMessages: ChatMessage[] = [];
   private chatRunning = false;
   private chatSessionId: string | null = null;
+  private persistSessionId: string | null = null;
+  private persistCreatedAt = 0;
+  private persistTimer: number | null = null;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -179,6 +182,7 @@ class App {
 
     // Agent 事件流 → 聊天消息累积
     window.easycode.onAgentEvent((data) => this.handleAgentEvent(data));
+    void this.restoreChatSession();
     window.easycode.onAgentExit((data) => {
       if (data.id === this.chatSessionId) {
         this.chatRunning = false;
@@ -1979,6 +1983,7 @@ class App {
   }
 
   private renderRightbar(): void {
+    this.schedulePersist();
     const body = this.root.querySelector(".rightbar-body") as HTMLElement | null;
     if (!body) return;
     const view = this.settings.rightView || "info";
@@ -2118,12 +2123,59 @@ class App {
     this.renderRightbar();
   }
 
+  private async restoreChatSession(): Promise<void> {
+    try {
+      const list = await window.easycode.listSessions();
+      if (!list || list.length === 0) return;
+      const latest = list[0];
+      const data = await window.easycode.loadSession(latest.id);
+      if (!data) return;
+      this.persistSessionId = data.id;
+      this.persistCreatedAt = data.createdAt || Date.now();
+      this.chatMessages = (data.messages as ChatMessage[]) || [];
+      if (this.settings.rightView === "chat") this.renderRightbar();
+    } catch {
+      /* restore fail silent */
+    }
+  }
+
+  private schedulePersist(): void {
+    if (this.chatMessages.length === 0) return;
+    if (this.persistTimer !== null) return;
+    this.persistTimer = window.setTimeout(() => {
+      this.persistTimer = null;
+      void this.persistChat();
+    }, 500);
+  }
+
+  private async persistChat(): Promise<void> {
+    try {
+      if (!this.persistSessionId) {
+        this.persistSessionId = "sess-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
+        this.persistCreatedAt = Date.now();
+      }
+      const firstFinal = this.chatMessages.find((m) => m.kind === "final" && m.text && m.text.length > 2);
+      const title = firstFinal?.text ? firstFinal.text.slice(0, 40) : "untitled";
+      await window.easycode.saveSession({
+        id: this.persistSessionId,
+        title,
+        createdAt: this.persistCreatedAt,
+        updatedAt: Date.now(),
+        messages: this.chatMessages,
+      });
+    } catch {
+      /* save fail silent */
+    }
+  }
+
   private async clearChat(): Promise<void> {
     if (this.chatSessionId) {
       await window.easycode.agentClear(this.chatSessionId);
     }
     this.chatMessages = [];
     this.chatRunning = false;
+    this.persistSessionId = null;
+    this.persistCreatedAt = 0;
     this.renderRightbar();
   }
 
