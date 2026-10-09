@@ -44,6 +44,7 @@ class App {
   private workspace = "";
   private tabs: EditorTab[] = [];
   private gitFileStatus = new Map<string, string>();
+  private editorDecorations: string[] = [];
   private activeTabId: string | null = null;
   private expanded = new Set<string>();
   private treeCache = new Map<string, Awaited<ReturnType<typeof window.easycode.listDir>>>();
@@ -1338,7 +1339,10 @@ class App {
       const label = document.createElement("button");
       label.type = "button";
       label.className = "tree-label";
-      label.textContent = entry.name;
+      const rel = this.relPathFromAbs(fullPath);
+      const ch = this.gitFileStatus.get(rel);
+      const badge = ch ? ` <span class="git-badge git-${ch.toLowerCase()}">${ch}</span>` : "";
+      label.innerHTML = `${escapeHtml(entry.name)}${badge}`;
       row.appendChild(twist);
       row.appendChild(label);
       container.appendChild(row);
@@ -1798,6 +1802,50 @@ class App {
     this.diffEditor.setModel({ original: originalModel, modified: modifiedModel });
   }
 
+  private async updateOverviewRuler(tab: EditorTab): Promise<void> {
+    if (!this.editor || tab.kind === "diff") return;
+    if (!this.workspace) {
+      if (this.editorDecorations.length) {
+        this.editorDecorations = this.editor.deltaDecorations(this.editorDecorations, []);
+      }
+      return;
+    }
+    try {
+      const res = await window.easycode.gitDiff(this.workspace, tab.path, false);
+      if (!res || !res.ok || !res.diff) {
+        if (this.editorDecorations.length) {
+          this.editorDecorations = this.editor.deltaDecorations(this.editorDecorations, []);
+        }
+        return;
+      }
+      const decorations: monaco.editor.IModelDeltaDecoration[] = [];
+      const lines = res.diff.split("\n");
+      let newLine = 0;
+      for (const line of lines) {
+        const m = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+        if (m) { newLine = parseInt(m[1], 10); continue; }
+        if (newLine === 0) continue;
+        if (line.startsWith("+") && !line.startsWith("+++")) {
+          decorations.push({
+            range: new monaco.Range(newLine, 1, newLine, 1),
+            options: {
+              isWholeLine: false,
+              linesDecorationsClassName: "git-added-gutter",
+              overviewRuler: { color: "#3fb950", position: monaco.editor.OverviewRulerLane.Right },
+              minimap: { color: "#3fb950", position: monaco.editor.MinimapPosition.Inline },
+            },
+          });
+          newLine++;
+        } else if (line.startsWith("-") && !line.startsWith("---")) {
+          // 删除行不占新行号
+        } else if (line.startsWith(" ")) {
+          newLine++;
+        }
+      }
+      this.editorDecorations = this.editor.deltaDecorations(this.editorDecorations, decorations);
+    } catch { /* ignore */ }
+  }
+
   private renderEditorHost(): void {
     const host = this.root.querySelector(".editor-host") as HTMLElement;
     const tab = this.activeTab();
@@ -1874,6 +1922,7 @@ class App {
       this.editor.updateOptions(this.editorOptions());
       this.editor.layout();
     }
+    void this.updateOverviewRuler(tab);
   }
 
   private scheduleAutoSave(): void {

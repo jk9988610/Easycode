@@ -2208,3 +2208,23 @@ button.status-item:hover {
 .tab .git-badge.git-u { color: #5eb3c4; }
 .tab .git-badge.git-d { color: #f1948a; }
 .tab .git-badge.git-r { color: #79b8ff; }
+
+/* overview ruler gutter */
+.git-added-gutter {
+  border-left: 3px solid #3fb950;
+  margin-left: 2px;
+}
+
+.tree-label .git-badge {
+  margin-left: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0 3px;
+  border-radius: 2px;
+  font-family: Cascadia Mono, Consolas, monospace;
+}
+.tree-label .git-badge.git-m { color: #d4a35c; }
+.tree-label .git-badge.git-a { color: #7dcea0; }
+.tree-label .git-badge.git-u { color: #5eb3c4; }
+.tree-label .git-badge.git-d { color: #f1948a; }
+.tree-label .git-badge.git-r { color: #79b8ff; }

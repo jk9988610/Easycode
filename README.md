@@ -1,5 +1,7 @@
 # Easycode
 
+
+
 干净的桌面代码编辑器壳：Electron + Monaco，布局对齐 VS Code。  
 **不预装**语言服务或第三方工具扩展。
 
