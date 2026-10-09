@@ -150,6 +150,14 @@ export async function gitRevParseHead(root: string): Promise<string | null> {
     return { ok: true, ref: list.ok ? list.stdout.trim() : undefined };
   }
   
+  export async function gitStashApply(
+    root: string,
+    ref: string,
+  ): Promise<{ ok: boolean; error?: string }> {
+    const res = await runGit(root, ["stash", "apply", ref]);
+    return res.ok ? { ok: true } : { ok: false, error: res.error };
+  }
+
   export async function gitStashPop(
     root: string,
     ref?: string,
