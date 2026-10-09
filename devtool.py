@@ -453,14 +453,26 @@ class App:
             self._auto_copy_after_run = True
             self.root.after(80, self.run_file_ops)
             return
-        if patch_name:
+        if patch_name:  # smart_run_patch_fixed
             self.set_status("识别 patch 脚本：" + patch_name + "，执行中...")
             self.refresh_patches()
+            _vals = list(self.patch_combo["values"] or ())
+            if patch_name not in _vals:
+                self.clear_log()
+                self.log("[智能运行] 未找到 patch 脚本：" + patch_name)
+                self.log("")
+                self.log("当前可用的 patch 脚本：")
+                for _v in _vals:
+                    self.log("  " + _v)
+                self.log("")
+                self.log("请确认文件名是否正确，或是否已写入项目根目录。")
+                self.set_status("patch 脚本不存在：" + patch_name)
+                return
             self.patch_var.set(patch_name)
             if source_tab != "patch":
                 self.nb.select(self.tab_patch)
             self._auto_copy_after_run = True
-            self.root.after(80, self.run_patch)
+            self.root.after(150, self.run_patch)
             return
         shell_ops = self._try_parse_shell_lines(content)
         if shell_ops:
@@ -477,6 +489,15 @@ class App:
         self.ops_text.insert("1.0", content)
         if source_tab == "patch":
             self.nb.select(self.tab_files)
+        self.clear_log()
+        self.log("[智能运行] 未识别出明确指令，内容已填入输入框。")
+        self.log("")
+        self.log("支持以下三种输入格式：")
+        self.log("  1. JSON 数组（含 ```json 代码块）")
+        self.log("  2. patch-xxx.py 或 patch-xxx.cjs 文件名")
+        self.log("  3. 多行 shell 命令（每行以已知命令词开头，如 git/npm/node）")
+        self.log("")
+        self.log("如要执行当前内容，请手动编辑为上述格式后点「▶ 执行文件操作」。")
         self.set_status("未识别出明确指令，已填入输入框")
 
     def copy_all(self):
