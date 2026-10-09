@@ -175,6 +175,22 @@ def apply_dark_theme(root):
     root.option_add("*TCombobox*Listbox.borderWidth", "0")
 
 
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "devtool-config.json")
+
+def _load_cfg():
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _save_cfg(cfg):
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
 class App:
     def __init__(self, root):
         self.root = root
@@ -232,8 +248,8 @@ class App:
         self.patch_combo.pack(side="left", padx=(0, 6))
         ttk.Button(f1, text="🔄 刷新", command=self.refresh_patches, width=8).pack(side="left", padx=2)
         ttk.Button(f1, text="▶ 运行 Patch", command=self.run_patch, width=12).pack(side="left", padx=2)
-        self.auto_tc_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(f1, text="patch 后自动 typecheck", variable=self.auto_tc_var).pack(side="left", padx=8)
+        self.auto_tc_var = tk.BooleanVar(value=_load_cfg().get("auto_typecheck", True))
+        ttk.Checkbutton(f1, text="patch 后自动 typecheck", variable=self.auto_tc_var, command=self._on_auto_tc_toggle).pack(side="left", padx=8)
         ttk.Button(f1, text="🔍 Typecheck", command=self.run_typecheck, width=12).pack(side="left", padx=2)
 
         f2 = ttk.LabelFrame(self.tab_patch, text="② 提交", padding=10)
@@ -566,6 +582,14 @@ class App:
             self.set_status("patch 完成，输出已复制到剪贴板")
         if getattr(self, "auto_tc_var", None) is not None and self.auto_tc_var.get():
             self.root.after(200, self.run_typecheck)
+
+    def _save_setting(self, key, value):
+        cfg = _load_cfg()
+        cfg[key] = value
+        _save_cfg(cfg)
+
+    def _on_auto_tc_toggle(self):
+        self._save_setting("auto_typecheck", bool(self.auto_tc_var.get()))
 
     def run_typecheck(self):
         threading.Thread(target=self._bg_typecheck, daemon=True).start()
