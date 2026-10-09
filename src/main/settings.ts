@@ -19,6 +19,7 @@ export interface AppSettings {
   autoDetectLanguage: boolean;
   autoDetectEncoding: boolean;
   showSidebar: boolean;
+  sidebarWidth: number;
   showPanel: boolean;
   showRightSidebar: boolean;
   panelHeight: number;
@@ -45,6 +46,7 @@ const DEFAULTS: AppSettings = {
   autoDetectLanguage: true,
   autoDetectEncoding: true,
   showSidebar: true,
+  sidebarWidth: 260,
   showPanel: false,
   showRightSidebar: false,
   panelHeight: 220,

@@ -1,13 +1,13 @@
 :root {
-  --bg: #1a1f24;
-  --panel: #22282f;
+  --bg: #0d1117;
+  --panel: #161b22;
   --ink: #e6edf2;
-  --muted: #8b9aa6;
-  --accent: #3d8fa0;
-  --line: #3a4550;
-  --entry: #14191e;
-  --danger: #c45c5c;
-  --ok: #5a9e6f;
+  --muted: #7d8590;
+  --accent: #58a6ff;
+  --line: #30363d;
+  --entry: #0a0d12;
+  --danger: #f85149;
+  --ok: #3fb950;
   --activity-w: 48px;
   --sidebar-w: 260px;
   --rightbar-w: 240px;
@@ -34,19 +34,19 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(139, 154, 166, 0.28);
+  background: rgba(125, 133, 144, 0.28);
   border: 2px solid transparent;
   border-radius: 6px;
   background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(139, 154, 166, 0.5);
+  background: rgba(125, 133, 144, 0.5);
   background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:active {
-  background: rgba(61, 143, 160, 0.65);
+  background: rgba(88, 166, 255, 0.65);
   background-clip: padding-box;
 }
 
@@ -240,7 +240,7 @@ select:focus {
 
 .titlebar .menu-trigger:hover,
 .titlebar .menu-root.open .menu-trigger {
-  background: #2a323a;
+  background: #1f2429;
 }
 
 .titlebar .menu-drop {
@@ -250,7 +250,7 @@ select:focus {
   top: calc(100% - 2px);
   min-width: 220px;
   padding: 4px;
-  background: #252b32;
+  background: #1c2128;
   border: 1px solid var(--line);
   border-radius: 6px;
   z-index: 100;
@@ -278,7 +278,7 @@ select:focus {
 }
 
 .titlebar .menu-drop button:hover {
-  background: #2f3942;
+  background: #262c33;
   border-color: transparent;
 }
 
@@ -315,14 +315,14 @@ select:focus {
 }
 
 .titlebar .layout-btns button:hover {
-  background: #2a323a;
+  background: #1f2429;
   color: var(--ink);
   border-color: transparent;
 }
 
 .titlebar .layout-btns button.active {
   color: var(--accent);
-  background: #2a323a;
+  background: #1f2429;
 }
 
 .titlebar .layout-btns button svg {
@@ -356,7 +356,7 @@ select:focus {
 }
 
 .titlebar .window-controls button:hover {
-  background: #2a323a;
+  background: #1f2429;
   border-color: transparent;
 }
 
@@ -405,7 +405,7 @@ select:focus {
 }
 
 .term-menu .drop button:hover {
-  background: #2a323a;
+  background: #1f2429;
 }
 
 .rightbar {
@@ -467,7 +467,7 @@ select:focus {
   height: var(--panel-h);
   min-height: 120px;
   border-top: 1px solid var(--line);
-  background: #12161b;
+  background: #0a0d12;
   display: flex;
   flex-direction: column;
   position: relative;
@@ -489,7 +489,7 @@ select:focus {
   gap: 8px;
   min-height: 32px;
   padding: 0 8px;
-  background: #151a1f;
+  background: #0b0f14;
   border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
 }
@@ -511,7 +511,7 @@ select:focus {
 
 .panel-views button.active,
 .panel-views button:hover {
-  background: #2a323a;
+  background: #1f2429;
   color: var(--ink);
   border-color: transparent;
 }
@@ -546,7 +546,7 @@ select:focus {
   right: 0;
   bottom: 0;
   width: 160px;
-  background: #14181d;
+  background: #0d1117;
   border-left: 1px solid var(--line);
   display: flex;
   flex-direction: column;
@@ -589,12 +589,12 @@ select:focus {
 }
 
 .term-sidebar-item:hover {
-  background: #2a323a;
+  background: #1f2429;
   color: var(--ink);
 }
 
 .term-sidebar-item.active {
-  background: #314049;
+  background: #1f6feb;
   color: var(--ink);
 }
 
@@ -639,7 +639,7 @@ select:focus {
 
 .term-sidebar-close:hover {
   color: var(--ink);
-  background: #3a4550;
+  background: #30363d;
 }
 
 .term-tabs-inline {
@@ -660,7 +660,7 @@ select:focus {
 }
 
 .term-tabs-inline .term-tab.active {
-  background: #2a323a;
+  background: #1f2429;
   color: var(--ink);
 }
 
@@ -674,7 +674,7 @@ select:focus {
   gap: 4px;
   height: 32px;
   padding: 0 8px;
-  background: #151a1f;
+  background: #0b0f14;
   border-bottom: 1px solid var(--line);
 }
 
@@ -695,7 +695,7 @@ select:focus {
 }
 
 .panel-tabs .term-tab.active {
-  background: #2a323a;
+  background: #1f2429;
   color: var(--ink);
 }
 
@@ -736,7 +736,7 @@ select:focus {
 
 
 .activity {
-  background: #151a1f;
+  background: #0b0f14;
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
@@ -785,7 +785,7 @@ select:focus {
 .activity button.active,
 .activity button:hover {
   color: var(--ink);
-  background: #2a323a;
+  background: #1f2429;
 }
 
 .activity button.active {
@@ -841,11 +841,11 @@ select:focus {
 }
 
 .tree-item:hover {
-  background: #2a323a;
+  background: #1f2429;
 }
 
 .tree-item.active {
-  background: #314049;
+  background: #1f6feb;
 }
 
 .tree-item .twist {
@@ -872,7 +872,7 @@ select:focus {
   flex-wrap: wrap;
   align-items: stretch;
   min-height: var(--tab-h);
-  background: #151a1f;
+  background: #0b0f14;
   border-bottom: 1px solid var(--line);
   overflow: hidden;
 }
@@ -936,7 +936,7 @@ select:focus {
 
 .tab .close:hover {
   color: var(--ink);
-  background: #3a4550;
+  background: #30363d;
 }
 
 .editor-host {
@@ -991,7 +991,7 @@ select:focus {
 
 .placeholder .welcome-actions button:hover {
   border-color: var(--accent);
-  background: #2a323a;
+  background: #1f2429;
 }
 
 .placeholder .welcome-actions kbd {
@@ -1010,7 +1010,7 @@ select:focus {
   justify-content: space-between;
   gap: 8px;
   padding: 0 4px 0 0;
-  background: #007acc;
+  background: #1f6feb;
   color: #fff;
   font-size: 12px;
   border-top: none;
@@ -1126,7 +1126,7 @@ button.status-item:hover {
 
 .change-list li:hover,
 .change-list li.active {
-  background: #2a323a;
+  background: #1f2429;
 }
 
 .kind {
@@ -1134,7 +1134,7 @@ button.status-item:hover {
   font-size: 11px;
   padding: 1px 6px;
   border-radius: 3px;
-  background: #314049;
+  background: #1f6feb;
 }
 
 .kind.added {
@@ -1229,7 +1229,7 @@ button.status-item:hover {
 
 .command-palette li.active,
 .command-palette li:hover {
-  background: #2a323a;
+  background: #1f2429;
 }
 
 .command-palette li.active .cmd-keys,
@@ -1281,7 +1281,7 @@ button.status-item:hover {
 }
 
 .titlebar-actions button:hover {
-  background: #2a323a;
+  background: #1f2429;
   color: var(--ink);
   border-color: transparent;
 }
@@ -1306,7 +1306,7 @@ button.status-item:hover {
 .account-pop {
   width: 220px;
   padding: 12px;
-  background: #252b32;
+  background: #1c2128;
   border: 1px solid var(--line);
   border-radius: 6px;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
@@ -1341,7 +1341,7 @@ button.status-item:hover {
 
 .rightbar-tabs button.active {
   color: var(--ink);
-  background: #2a323a;
+  background: #1f2429;
 }
 
 .placeholder-pane {
@@ -1406,7 +1406,7 @@ button.status-item:hover {
 .ext-output-tabs button.active,
 .ext-output-tabs button:hover {
   color: var(--ink);
-  background: #2a323a;
+  background: #1f2429;
   border-color: transparent;
 }
 
@@ -1447,7 +1447,7 @@ button.status-item:hover {
 }
 
 .problem-row:hover {
-  background: #2a323a;
+  background: #1f2429;
   border-color: transparent;
 }
 
@@ -1492,7 +1492,7 @@ button.status-item:hover {
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #1e242a;
+  background: #161b22;
 }
 
 .ext-item-name {
@@ -1557,7 +1557,7 @@ button.status-item:hover {
 
 .open-editor:hover,
 .open-editor.active {
-  background: #2a323a;
+  background: #1f2429;
   border-color: transparent;
 }
 
@@ -1588,7 +1588,7 @@ button.status-item:hover {
 }
 
 .tree-label:hover {
-  background: #2a323a;
+  background: #1f2429;
   border-color: transparent;
 }
 
@@ -1599,7 +1599,7 @@ button.status-item:hover {
 .chat-bubble {
   padding: 8px 10px;
   border-radius: 6px;
-  background: #2a323a;
+  background: #1f2429;
   font-size: 12px;
   line-height: 1.45;
 }
@@ -1759,7 +1759,7 @@ button.status-item:hover {
 
 .command-palette .palette-item.active,
 .command-palette .palette-item:hover {
-  background: #2a323a;
+  background: #1f2429;
   border-color: transparent;
 }
 
@@ -1780,7 +1780,7 @@ button.status-item:hover {
   bottom: 0;
   min-width: 220px;
   padding: 4px;
-  background: #252b32;
+  background: #1c2128;
   border: 1px solid var(--line);
   border-radius: 6px;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
@@ -1809,7 +1809,7 @@ button.status-item:hover {
 }
 
 .manage-menu button:hover {
-  background: #2f3942;
+  background: #262c33;
   border-color: transparent;
 }
 
@@ -1833,7 +1833,7 @@ button.status-item:hover {
 .settings-dialog {
   width: min(980px, 94vw);
   height: min(720px, 88vh);
-  background: #1e1e1e;
+  background: #0d1117;
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
@@ -1872,8 +1872,8 @@ button.status-item:hover {
 }
 
 .settings-top-actions .ghost {
-  background: #0e639c;
-  border-color: #0e639c;
+  background: #1f6feb;
+  border-color: #1f6feb;
   color: #fff;
   font-size: 12px;
   padding: 5px 10px;
@@ -1894,7 +1894,7 @@ button.status-item:hover {
 }
 
 .settings-top-actions .icon-btn:hover {
-  background: #2a323a;
+  background: #1f2429;
   color: var(--ink);
   border-color: transparent;
 }
@@ -1918,7 +1918,7 @@ button.status-item:hover {
 
 .settings-tabs button.active {
   color: var(--ink);
-  border-bottom-color: #007acc;
+  border-bottom-color: #1f6feb;
 }
 
 .settings-body {
@@ -1932,7 +1932,7 @@ button.status-item:hover {
   border-right: 1px solid var(--line);
   overflow: auto;
   padding: 8px 0;
-  background: #181818;
+  background: #0d1117;
 }
 
 .settings-nav button {
@@ -1948,15 +1948,15 @@ button.status-item:hover {
 }
 
 .settings-nav button:hover {
-  background: #2a2a2a;
+  background: #21262d;
   color: var(--ink);
   border-color: transparent;
 }
 
 .settings-nav button.active {
-  background: #2a2d2e;
+  background: #21262d;
   color: var(--ink);
-  box-shadow: inset 3px 0 0 #007acc;
+  box-shadow: inset 3px 0 0 #1f6feb;
 }
 
 .settings-content {
@@ -1972,13 +1972,13 @@ button.status-item:hover {
 
 .settings-item {
   padding: 12px 0 16px;
-  border-bottom: 1px solid #2a2a2a;
+  border-bottom: 1px solid #21262d;
 }
 
 .settings-item-title {
   font-size: 13px;
   font-weight: 600;
-  color: #cccccc;
+  color: #e6edf2;
   margin-bottom: 4px;
 }
 
@@ -2069,7 +2069,7 @@ button.status-item:hover {
 }
 
 .scm-refresh:hover {
-  background: #2a323a;
+  background: #1f2429;
   color: var(--ink);
 }
 
@@ -2108,7 +2108,7 @@ button.status-item:hover {
 }
 
 .scm-row:hover {
-  background: #2a323a;
+  background: #1f2429;
 }
 
 .scm-status {
@@ -2156,6 +2156,23 @@ button.status-item:hover {
 }
 
 .scm-action:hover {
-  background: #3a4550;
+  background: #30363d;
   color: var(--ink);
+}
+
+/* sidebar resize */
+.sidebar {
+  position: relative;
+}
+.sidebar-sash {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+  z-index: 6;
+}
+.sidebar-sash:hover {
+  background: linear-gradient(to right, transparent 2px, var(--accent) 2px, var(--accent) 4px, transparent 4px);
 }

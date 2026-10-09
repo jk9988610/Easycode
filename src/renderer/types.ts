@@ -46,6 +46,7 @@ export interface AppSettings {
   autoDetectLanguage: boolean;
   autoDetectEncoding: boolean;
   showSidebar: boolean;
+  sidebarWidth: number;
   showPanel: boolean;
   showRightSidebar: boolean;
   panelHeight: number;
