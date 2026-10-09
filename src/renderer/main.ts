@@ -1948,6 +1948,7 @@ class App {
     sendBtn?.addEventListener("click", () => this.sendChatMessage());
     stopBtn?.addEventListener("click", () => this.stopChat());
     clearBtn?.addEventListener("click", () => void this.clearChat());
+    body.querySelector("[data-chat-rollback-bar]")?.addEventListener("click", () => void this.rollbackChat());
     input?.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
@@ -2007,6 +2008,24 @@ class App {
     this.chatRunning = false;
     this.chatSessionId = null;
     this.renderRightbar();
+  }
+
+  private async rollbackChat(): Promise<void> {
+    const id = this.chatSessionId;
+    console.log("[ROLLBACK-DBG] id=", id);
+    if (!id) {
+      this.showToast("无活动会话，无法回滚");
+      return;
+    }
+    const res = await window.easycode.agentRollback(id);
+    console.log("[ROLLBACK-DBG] res=", res);
+    if (res.ok) {
+      this.showToast("已回滚本轮改动");
+      await this.refreshOpenTabsFromDisk();
+      if (this.activity === "scm") this.renderSidebarBody();
+    } else {
+      this.showToast("回滚失败：" + res.message);
+    }
   }
 
   private handleAgentEvent(data: AgentEventPayload): void {
