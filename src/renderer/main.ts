@@ -1919,6 +1919,14 @@ class App {
       return `<div class="chat-msg tool-result"><span class="chat-icon">📄</span><pre class="chat-pre">${esc(
         (m.toolResult || "").slice(0, 500),
       )}</pre></div>`;
+    if (m.kind === "verify_result") {
+      const ok = (m as unknown as { ok?: boolean }).ok !== false;
+      const cls = ok ? "final" : "error";
+      const icon = ok ? "✔" : "✘";
+      return `<div class="chat-msg ${cls}"><span class="chat-icon">${icon}</span><span>${esc(
+        m.text || "",
+      )}</span></div>`;
+    }
     if (m.kind === "error")
       return `<div class="chat-msg error"><span class="chat-icon">❌</span><span>${esc(
         m.message || m.text || "",
@@ -2008,6 +2016,16 @@ class App {
       return;
     }
     if (data.type === "turn_start") return; // 不显示轮次标记
+    if (data.type === "verify_result") {
+      this.chatMessages.push({
+        ts: data.ts * 1000,
+        kind: "verify_result",
+        text: data.message,
+        ok: data.ok,
+      } as ChatMessage);
+      this.renderRightbar();
+      return;
+    }
 
     const m: ChatMessage = {
       ts: data.ts * 1000,

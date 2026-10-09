@@ -35,6 +35,7 @@ export interface AgentEvent {
     | "tool_call"
     | "tool_result"
     | "final"
+    | "verify_result"
     | "stopped"
     | "error"
     | "session_started"
@@ -46,6 +47,8 @@ export interface AgentEvent {
   id?: string;
   result?: string;
   message?: string;
+  detail?: string;
+  ok?: boolean;
 }
 
 type EventHandler = (id: string, event: AgentEvent) => void;
@@ -72,6 +75,7 @@ function requireAgentCoreDir(): string {
 export class AgentHost {
   private sessions = new Map<string, Session>();
   private seq = 1;
+  private pendingPyChanges = new Map<string, Set<string>>();
   private checkpoints = new Map<
     string,
     { cwd: string; headSha: string | null; stashRef: string | null }
@@ -267,7 +271,7 @@ export class AgentHost {
   private parseAndForward(id: string, line: string): void {
     try {
       const event = JSON.parse(line) as AgentEvent;
-      this.onEvent(id, event);
+      this.handleEvent(id, event);
     } catch {
       this.onEvent(id, {
         ts: Date.now() / 1000,
@@ -275,6 +279,76 @@ export class AgentHost {
         message: `[stdout 非预期输出] ${line}`,
       });
     }
+  }
+
+  private handleEvent(id: string, event: AgentEvent): void {
+    if (event.type === "tool_call" && event.name && event.arguments) {
+      this.recordPyChange(id, event.name, event.arguments);
+    }
+    this.onEvent(id, event);
+    if (event.type === "ready") {
+      void this.verifyPendingChanges(id);
+    }
+  }
+
+  private recordPyChange(id: string, toolName: string, argsJson: string): void {
+    if (toolName !== "write_file" && toolName !== "edit_file") return;
+    try {
+      const args = JSON.parse(argsJson) as { path?: string };
+      const p = args.path;
+      if (!p) return;
+      const norm = p.replace(/\\/g, "/");
+      if (!/\/agent-core\/[^/]+\.py$/.test(norm)) return;
+      let set = this.pendingPyChanges.get(id);
+      if (!set) {
+        set = new Set();
+        this.pendingPyChanges.set(id, set);
+      }
+      set.add(p);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private async verifyPendingChanges(id: string): Promise<void> {
+    const set = this.pendingPyChanges.get(id);
+    if (!set || set.size === 0) return;
+    const files = [...set];
+    this.pendingPyChanges.delete(id);
+    const s = this.sessions.get(id);
+    if (!s) return;
+    const python = resolvePython();
+    if (!python) {
+      this.onEvent(id, {
+        ts: Date.now() / 1000,
+        type: "error",
+        message: "无法 py_compile：找不到 Python 解释器",
+      });
+      return;
+    }
+    const { spawn } = await import("node:child_process");
+    const args = [...python.args, "-m", "py_compile", ...files];
+    const proc = spawn(python.command, args, { cwd: s.cwd, windowsHide: true });
+    let stderr = "";
+    proc.stderr?.on("data", (c) => (stderr += String(c)));
+    proc.on("exit", (code) => {
+      const names = files.map((f) => f.split(/[\\/]/).pop()).join(", ");
+      if (code === 0) {
+        this.onEvent(id, {
+          ts: Date.now() / 1000,
+          type: "verify_result",
+          ok: true,
+          message: `py_compile 通过：${names}`,
+        });
+      } else {
+        this.onEvent(id, {
+          ts: Date.now() / 1000,
+          type: "error",
+          message: `py_compile 失败：${names}（子进程仍跑旧代码，请修复后重发）`,
+          detail: stderr.trim(),
+        });
+      }
+    });
   }
 
   list(): { id: string; cwd: string }[] {

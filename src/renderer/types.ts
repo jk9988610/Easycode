@@ -92,11 +92,13 @@ export interface AgentEventPayload {
     | "tool_call"
     | "tool_result"
     | "final"
+    | "verify_result"
     | "stopped"
     | "error"
     | "session_started"
     | "ready";
   turn?: number;
+  ok?: boolean;
   content?: string;
   name?: string;
   arguments?: string;
@@ -109,7 +111,7 @@ export interface ChatMessage {
   /** 渲染进程生成的时间戳,用于排序 */
   ts: number;
   /** 消息类型 */
-  kind: "thinking" | "tool_call" | "tool_result" | "final" | "error";
+  kind: "thinking" | "tool_call" | "tool_result" | "verify_result" | "final" | "error";
   /** 工具名(tool_call/tool_result) */
   toolName?: string;
   /** 工具参数(tool_call) */
@@ -122,6 +124,8 @@ export interface ChatMessage {
   message?: string;
   /** 所属轮次 */
   turn?: number;
+  /** 校验结果(verify_result) */
+  ok?: boolean;
 }
 
 export interface EasycodeApi {
