@@ -1823,29 +1823,44 @@ class App {
         return;
       }
       const decorations: monaco.editor.IModelDeltaDecoration[] = [];
-      const lines = res.diff.split("\n");
+      const diffLines = res.diff.split(String.fromCharCode(10));
       let newLine = 0;
-      for (const line of lines) {
-        const m = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-        if (m) { newLine = parseInt(m[1], 10); continue; }
-        if (newLine === 0) continue;
-        if (line.startsWith("+") && !line.startsWith("+++")) {
+      let addStart = -1, addCount = 0, delCount = 0;
+      const pushRange = (start: number, count: number, cls: string, color: string) => {
+        for (let k = 0; k < count; k++) {
           decorations.push({
-            range: new monaco.Range(newLine, 1, newLine, 1),
+            range: new monaco.Range(start + k, 1, start + k, 1),
             options: {
               isWholeLine: false,
-              linesDecorationsClassName: "git-added-gutter",
-              overviewRuler: { color: "#3fb950", position: monaco.editor.OverviewRulerLane.Right },
-              minimap: { color: "#3fb950", position: monaco.editor.MinimapPosition.Inline },
+              linesDecorationsClassName: cls,
+              overviewRuler: { color, position: monaco.editor.OverviewRulerLane.Right },
+              minimap: { color, position: monaco.editor.MinimapPosition.Inline },
             },
           });
-          newLine++;
-        } else if (line.startsWith("-") && !line.startsWith("---")) {
-          // 删除行不占新行号
-        } else if (line.startsWith(" ")) {
-          newLine++;
+        }
+      };
+      const flush = () => {
+        if (addCount > 0 && delCount > 0) pushRange(addStart, addCount, "git-modified-gutter", "#58a6ff");
+        else if (addCount > 0) pushRange(addStart, addCount, "git-added-gutter", "#3fb950");
+        else if (delCount > 0) pushRange(Math.max(1, newLine), 1, "git-deleted-gutter", "#f85149");
+        addStart = -1; addCount = 0; delCount = 0;
+      };
+      for (const ln of diffLines) {
+        const m = ln.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+        if (m) { flush(); newLine = parseInt(m[1], 10); continue; }
+        if (ln.startsWith("---") || ln.startsWith("+++")) continue;
+        if (ln.startsWith("+")) {
+          if (addStart === -1) addStart = newLine;
+          addCount++; newLine++;
+        } else if (ln.startsWith("-")) {
+          delCount++;
+        } else if (ln.startsWith(" ")) {
+          flush(); newLine++;
+        } else {
+          flush();
         }
       }
+      flush();
       this.editorDecorations = this.editor.deltaDecorations(this.editorDecorations, decorations);
     } catch { /* ignore */ }
   }

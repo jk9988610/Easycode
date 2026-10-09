@@ -2228,3 +2228,6 @@ button.status-item:hover {
 .tree-label .git-badge.git-u { color: #5eb3c4; }
 .tree-label .git-badge.git-d { color: #f1948a; }
 .tree-label .git-badge.git-r { color: #79b8ff; }
+
+.git-modified-gutter { border-left: 3px solid #58a6ff; margin-left: 2px; }
+.git-deleted-gutter { border-left: 3px solid #f85149; margin-left: 2px; }
