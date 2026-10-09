@@ -406,6 +406,32 @@ class App:
                 return None
         return candidate
 
+    def _try_parse_shell_lines(self, text):
+        s = text.strip()
+        if not s or len(s) > 4000:
+            return None
+        if chr(96) * 3 in s:
+            return None
+        lines = [l.strip() for l in s.split(chr(10))]
+        lines = [l for l in lines if l]
+        if not lines or len(lines) > 20:
+            return None
+        known = {'npm', 'npx', 'node', 'python', 'python3', 'py', 'git', 'dir', 'type', 'findstr', 'echo', 'del', 'copy', 'move', 'mkdir', 'rmdir', 'cd', 'chdir', 'powershell', 'cmd', 'where', 'taskkill', 'cls', 'attrib', 'ren', 'rename', 'start', 'call', 'set'}
+        bad_start = ('{', '[', '#', '//', '>', '*', '|', '=', '<', '!')
+        ops = []
+        for l in lines:
+            if l.startswith(bad_start):
+                return None
+            parts = l.split()
+            if not parts:
+                return None
+            first = parts[0].lower()
+            if first not in known:
+                return None
+            ops.append({'op': 'shell', 'cmd': l})
+        return ops
+
+
     def smart_run(self, source_tab):
         content = self._get_clipboard()
         if not content:
@@ -436,6 +462,17 @@ class App:
             self._auto_copy_after_run = True
             self.root.after(80, self.run_patch)
             return
+        shell_ops = self._try_parse_shell_lines(content)
+        if shell_ops:
+            n = len(shell_ops)
+            self.set_status("识别为 shell 命令（" + str(n) + " 条），执行中...")
+            self.ops_text.delete("1.0", "end")
+            self.ops_text.insert("1.0", json.dumps(shell_ops, ensure_ascii=False, indent=2))
+            if source_tab != "files":
+                self.nb.select(self.tab_files)
+            self._auto_copy_after_run = True
+            self.root.after(80, self.run_file_ops)
+            return
         self.ops_text.delete("1.0", "end")
         self.ops_text.insert("1.0", content)
         if source_tab == "patch":
@@ -457,10 +494,9 @@ class App:
         self.root.after(0, lambda: self.status_var.set(t))
 
     def run_cmd(self, cmd, cwd=ROOT):
-        if cmd and cmd[0] == "node":
-            cmd = [_find_node_exe()] + list(cmd[1:])
-        if os.name == "nt" and cmd and cmd[0] in ("npm", "npx"):
-            cmd = [cmd[0] + ".cmd"] + cmd[1:]
+        if cmd:
+            cmd = list(cmd)
+            cmd[0] = _resolve_exe(cmd[0])
         self.log("$ " + " ".join(cmd))
         try:
             p = subprocess.run(
