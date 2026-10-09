@@ -1894,6 +1894,7 @@ class App {
             <button type="button" data-chat-clear title="清空对话"${
               hasHistory || this.chatSessionId ? "" : " disabled"
             }>清空</button>
+            <button type="button" data-chat-rollback-bar title="回滚本轮改动">回滚</button>
             <div class="spacer"></div>
             ${
               this.chatRunning
