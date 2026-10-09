@@ -114,6 +114,8 @@ updateplan.md             历史规划笔记
 - ✅ **聊天底部"回滚本轮"按钮**（Step 3）
 - ✅ **system prompt 强制"改完必须验证"**（Step 2 延伸）
 - ✅ 聊天面板实时显示思考 / 工具调用 / 结果 / 验证状态
+- ✅ **会话持久化**：启动恢复 + 消息 500ms 防抖落盘（`sessionStore.ts` + `window.easycode.*Session`）
+- ✅ **Chat 多会话 UI**：历史下拉框 + 新建对话，header 固定不随消息滚动
 
 ### 🛠️ devtool.py（AI 开发辅助）
 - ✅ 三 tab：文件操作 / Patch & Commit / 帮助
@@ -129,12 +131,9 @@ updateplan.md             历史规划笔记
 
 | 优先级 | 项目 | 状态 |
 |---|---|---|
-| 🔴 | **会话持久化**：`sessionStore.ts` + IPC 已就绪，但 renderer 端没接（`listSessions` 没被调用） | 半成品 |
 | 🟠 | **正式打包**：`electron-builder` 需挂代理下载 Electron / NSIS 二进制 | 未跑通 |
-| 🟡 | **多会话 UI**：新建 / 切换 / 删除会话 | 未开始 |
 | 🟡 | **上下文注入**：自动带上"当前打开的文件 / 选中的代码" | 未开始 |
 | 🟡 | **Diff 预览**：Agent 改文件前先弹 diff 让用户确认 | 未开始 |
-| 🟢 | **仓库清理**：根目录 20+ 个 `patch-*.cjs` / `explore.cjs` / `dev.log` / `*.bak` 应删或 gitignore | 待办 |
 | 🟢 | **`AGENTS.md`**：面向接手 AI 的约定文件 | 未创建 |
 
 ---
@@ -143,9 +142,10 @@ updateplan.md             历史规划笔记
 
 1. **源文件多为 CRLF** —— patch 脚本处理时用 `\r` 感知或按行 split，勿用多行字符串匹配
 2. **不要用 PowerShell `Set-Content` 改源码** —— 会把 UTF-8 中文写坏，用 devtool 或 Node 脚本
-3. **patch 脚本命名必须 `patch-*.cjs`** 才会出现在 devtool 下拉里
+3. **patch 脚本命名必须 `patch-*.py`**（优先）或 `patch-*.cjs`，才会出现在 devtool 下拉里
 4. **patch 脚本必须幂等** —— 先检测锚点是否存在，已存在就跳过
 5. **开发用 `npm run dev`** —— 不经过 electron-builder，无打包依赖问题
 6. **renderer 改动 Vite 热更，主进程改动需重启 dev**
+7. **⚠️ 在 EasyCode 里用 chat 前，先 commit 未提交的 devtool 改动** —— Agent 每次启动会 `git stash push` 做检查点，未提交改动会被 stash 走（从编辑器里"消失"）。发现改动丢失时：`git stash list` 找，然后 `git checkout stash@{0} -- <文件>` 恢复
 
 ---
