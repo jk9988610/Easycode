@@ -1726,16 +1726,12 @@ class App {
     host.innerHTML = `<div class="monaco" id="diff-root"></div>`;
     const el = host.querySelector("#diff-root") as HTMLElement | null;
     if (!el) return;
-    const originalModel = monaco.editor.createModel(
-      tab.original,
-      tab.language,
-      monaco.Uri.parse(`easycode-diff-original://${encodeURIComponent(tab.id)}`),
-    );
-    const modifiedModel = monaco.editor.createModel(
-      tab.content,
-      tab.language,
-      monaco.Uri.parse(`easycode-diff-modified://${encodeURIComponent(tab.id)}`),
-    );
+    const origUri = monaco.Uri.parse(`easycode-diff-original://${encodeURIComponent(tab.id)}`);
+    const modUri = monaco.Uri.parse(`easycode-diff-modified://${encodeURIComponent(tab.id)}`);
+    monaco.editor.getModel(origUri)?.dispose();
+    monaco.editor.getModel(modUri)?.dispose();
+    const originalModel = monaco.editor.createModel(tab.original, tab.language, origUri);
+    const modifiedModel = monaco.editor.createModel(tab.content, tab.language, modUri);
     this.diffEditor = monaco.editor.createDiffEditor(el, {
       ...this.editorOptions(),
       automaticLayout: true,
@@ -1849,6 +1845,13 @@ class App {
   private disposeEditors(): void {
     this.editor?.dispose();
     this.editor = null;
+    if (this.diffEditor) {
+      const m = this.diffEditor.getModel();
+      this.diffEditor.dispose();
+      m?.original.dispose();
+      m?.modified.dispose();
+      this.diffEditor = null;
+    }
   }
 
   private renderRightbar(): void {
