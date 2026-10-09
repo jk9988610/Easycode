@@ -2289,3 +2289,11 @@ button.status-item:hover {
 .chat-think-summary:hover { color: #ccc; }
 .chat-think-summary::-webkit-details-marker { display: none; }
 .chat-think-body { margin-top: 4px; padding-left: 8px; border-left: 2px solid #333; color: #aaa; font-size: 12px; }
+
+.chat-work { margin: 4px 0; }
+.chat-work-summary { cursor: pointer; color: #888; font-size: 12px; user-select: none; padding: 4px 0; list-style: none; }
+.chat-work-summary:hover { color: #ccc; }
+.chat-work-summary::-webkit-details-marker { display: none; }
+.chat-work-body { padding-left: 8px; border-left: 2px solid #333; margin-top: 2px; }
+.chat-file-link { color: #4ea1ff; text-decoration: none; border-bottom: 1px dotted #4ea1ff; cursor: pointer; }
+.chat-file-link:hover { color: #7dc0ff; }

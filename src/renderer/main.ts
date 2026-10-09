@@ -2004,35 +2004,7 @@ class App {
   // --- Agent chat rendering & logic ---
 
   private renderChatHtml(): string {
-    const _collapsedIdx = new Set<number>();
-    {
-      const _openIdx: number[] = [];
-      for (let i = 0; i < this.chatMessages.length; i++) {
-        const k = this.chatMessages[i].kind;
-        if (k === "thinking") _openIdx.push(i);
-        else if (k === "final" || k === "error") {
-          for (const j of _openIdx) _collapsedIdx.add(j);
-          _openIdx.length = 0;
-        }
-      }
-    }
-    const messages = this.chatMessages.length
-      ? this.chatMessages
-          .map((m, i) => {
-            let html = this.renderChatMessage(m);
-            if (m.kind === "final" && m.text && !m.text.startsWith("📝 ")) {
-              const head = html.match(/^(<div class="chat-msg final"><span class="chat-icon">[^<]*<\/span>)/);
-              if (head) {
-                html = head[1] + `<div class="chat-md">${this.renderMiniMarkdown(m.text)}</div></div>`;
-              }
-            }
-            if (m.kind === "thinking" && _collapsedIdx.has(i)) {
-              html = `<details class="chat-msg thinking collapsed"><summary class="chat-think-summary">💭 思考过程（点击展开）</summary><div class="chat-think-body">${html}</div></details>`;
-            }
-            return html;
-          })
-          .join("")
-      : `<div class="chat-empty">开始新的对话</div>`;
+    const messages = this.renderChatBlocks();
     const apiKeyOk = !!this.settings.agentApiKey;
     const placeholder = apiKeyOk
       ? "描述任务,支持多轮对话。例如:读取 main.ts,然后给它加注释"
@@ -2070,6 +2042,56 @@ class App {
           </div>
         </div>
       </div>`;
+  }
+
+  private renderChatBlocks(): string {
+    const parts: string[] = [];
+    const PIC = String.fromCharCode(0x1F4DD);
+    let i = 0;
+    while (i < this.chatMessages.length) {
+      const m = this.chatMessages[i];
+      const isUser = m.kind === "final" && m.text && m.text.startsWith(PIC + " ");
+      if (isUser) {
+        parts.push(this.renderChatMessage(m));
+        i++;
+        continue;
+      }
+      const block: ChatMessage[] = [];
+      let finalMsg: ChatMessage | null = null;
+      while (i < this.chatMessages.length) {
+        const x = this.chatMessages[i];
+        const xUser = x.kind === "final" && x.text && x.text.startsWith(PIC + " ");
+        if (xUser) break;
+        if (x.kind === "final") { finalMsg = x; i++; break; }
+        block.push(x);
+        i++;
+      }
+      if (block.length > 0) {
+        const firstTs = block[0].ts;
+        const lastTs = block[block.length - 1].ts;
+        const elapsed = Math.max(0, Math.round((lastTs - firstTs) / 1000));
+        const steps = block.filter((x) => x.kind === "tool_call").length;
+        const timeStr = elapsed < 60 ? elapsed + "s" : Math.floor(elapsed / 60) + "m " + (elapsed % 60) + "s";
+        const label = finalMsg
+          ? "已完成 " + steps + " 步 · 用时 " + timeStr
+          : "进行中 " + steps + " 步 · " + timeStr;
+        const openAttr = finalMsg ? "" : " open";
+        const body = block.map((x) => this.renderChatMessage(x)).join("");
+        parts.push(`<details class="chat-work"${openAttr}><summary class="chat-work-summary">${label}</summary><div class="chat-work-body">${body}</div></details>`);
+      }
+      if (finalMsg) {
+        const html = this.renderChatMessage(finalMsg);
+        const marker = `<div class="chat-msg final"><span class="chat-icon">`;
+        const closePos = html.indexOf(`</span>`);
+        if (html.startsWith(marker) && closePos > 0) {
+          const head = html.slice(0, closePos + 7);
+          parts.push(head + `<div class="chat-md">${this.renderMiniMarkdown(finalMsg.text || "")}</div></div>`);
+        } else {
+          parts.push(html);
+        }
+      }
+    }
+    return parts.length ? parts.join("") : `<div class="chat-empty">开始新的对话</div>`;
   }
 
   private renderMiniMarkdown(text: string): string {
@@ -2116,10 +2138,18 @@ class App {
       return `<div class="chat-msg thinking"><span class="chat-icon">💭</span><span>${esc(
         m.text || "",
       )}</span></div>`;
-    if (m.kind === "tool_call")
-      return `<div class="chat-msg tool-call"><span class="chat-icon">🔧</span><span><b>${esc(
-        m.toolName || "",
-      )}</b>(${esc(m.toolArgs || "")})</span></div>`;
+    if (m.kind === "tool_call") {
+      let argsHtml = esc(m.toolArgs || "");
+      try {
+        const parsed = JSON.parse(m.toolArgs || "{}");
+        if (parsed && typeof parsed.path === "string" && parsed.path) {
+          const safeP = escapeAttr(parsed.path);
+          const escP = esc(parsed.path);
+          argsHtml = argsHtml.split(escP).join(`<a class="chat-file-link" data-open-file="${safeP}" href="#">${escP}</a>`);
+        }
+      } catch { /* ignore */ }
+      return `<div class="chat-msg tool-call"><span class="chat-icon">🔧</span><span><b>${esc(m.toolName || "")}</b>(${argsHtml})</span></div>`;
+    }
     if (m.kind === "tool_result")
       return `<div class="chat-msg tool-result"><span class="chat-icon">📄</span><pre class="chat-pre">${esc(
         (m.toolResult || "").slice(0, 500),
@@ -2156,6 +2186,13 @@ class App {
     const _sel = body.querySelector("[data-chat-sessions]") as HTMLSelectElement | null;
     _sel?.addEventListener("change", () => void this.switchChatSession(_sel.value));
     body.querySelector("[data-chat-new]")?.addEventListener("click", () => void this.newChatSession());
+    body.querySelectorAll("[data-open-file]").forEach((el) => {
+      el.addEventListener("click", (e) => {
+        e.preventDefault();
+        const p = el.getAttribute("data-open-file");
+        if (p) void this.openFile(p);
+      });
+    });
     input?.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
