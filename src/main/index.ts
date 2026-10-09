@@ -277,7 +277,11 @@ ipcMain.handle("term:list", () => terminalHost?.list() ?? []);
   ipcMain.handle("agent:stop", (_e, id: string) => {
     agentHost?.stop(id);
   });
-  ipcMain.handle("agent:list", () => agentHost?.list() ?? []);
+    ipcMain.handle("agent:rollback", async (_e, id: string) => {
+    if (!agentHost) return { ok: false, message: "no agent host" };
+    return await agentHost.rollback(id);
+  });
+ipcMain.handle("agent:list", () => agentHost?.list() ?? []);
 
   ipcMain.handle("lsp:request", async (_e, method: string, params: unknown) => {
     const session = pickServer(params);

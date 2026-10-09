@@ -168,6 +168,8 @@ const api = {
     ipcRenderer.invoke("agent:clear", id),
   agentStop: (id: string): Promise<void> =>
     ipcRenderer.invoke("agent:stop", id),
+  agentRollback: (id: string): Promise<{ ok: boolean; message: string }> =>
+    ipcRenderer.invoke("agent:rollback", id),
   agentList: () => ipcRenderer.invoke("agent:list"),
   onAgentEvent: (
     cb: (data: {

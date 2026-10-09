@@ -128,3 +128,57 @@ export async function gitShow(
   }
   return { ok: true, content: res.stdout };
 }
+
+export async function gitRevParseHead(root: string): Promise<string | null> {
+    const res = await runGit(root, ["rev-parse", "HEAD"]);
+    return res.ok ? res.stdout.trim() : null;
+  }
+  
+  export async function gitIsDirty(root: string): Promise<boolean> {
+    const res = await runGit(root, ["status", "--porcelain"]);
+    return res.ok && res.stdout.trim().length > 0;
+  }
+  
+  export async function gitStashPush(
+    root: string,
+    message: string,
+  ): Promise<{ ok: boolean; ref?: string; error?: string }> {
+    const res = await runGit(root, ["stash", "push", "-u", "-m", message]);
+    if (!res.ok) return { ok: false, error: res.error };
+    if (res.stdout.includes("No local changes")) return { ok: true };
+    const list = await runGit(root, ["stash", "list", "-1", "--format=%gd"]);
+    return { ok: true, ref: list.ok ? list.stdout.trim() : undefined };
+  }
+  
+  export async function gitStashPop(
+    root: string,
+    ref?: string,
+  ): Promise<{ ok: boolean; error?: string }> {
+    const args = ref ? ["stash", "pop", ref] : ["stash", "pop"];
+    const res = await runGit(root, args);
+    return res.ok ? { ok: true } : { ok: false, error: res.error };
+  }
+  
+  export async function gitStashDrop(
+    root: string,
+    ref?: string,
+  ): Promise<{ ok: boolean; error?: string }> {
+    const args = ref ? ["stash", "drop", ref] : ["stash", "drop"];
+    const res = await runGit(root, args);
+    return res.ok ? { ok: true } : { ok: false, error: res.error };
+  }
+  
+  export async function gitResetHard(
+    root: string,
+    rev: string,
+  ): Promise<{ ok: boolean; error?: string }> {
+    const res = await runGit(root, ["reset", "--hard", rev]);
+    return res.ok ? { ok: true } : { ok: false, error: res.error };
+  }
+  
+  export async function gitCleanFd(
+    root: string,
+  ): Promise<{ ok: boolean; error?: string }> {
+    const res = await runGit(root, ["clean", "-fd"]);
+    return res.ok ? { ok: true } : { ok: false, error: res.error };
+  }

@@ -209,6 +209,7 @@ export interface EasycodeApi {
   gitCommit: (root: string, message: string) => Promise<{ ok: boolean; message: string }>;
   gitDiff: (root: string, path: string, staged: boolean) => Promise<{ ok: boolean; diff?: string; error?: string }>;
   gitShow: (root: string, rev: string, path: string) => Promise<{ ok: boolean; content?: string; error?: string }>;
+  agentRollback: (id: string) => Promise<{ ok: boolean; message: string }>;
   // Agent (agent-core Python 子进程,交互式长对话)
   agentStart: () => Promise<string>;
   agentSend: (id: string, content: string) => Promise<void>;
