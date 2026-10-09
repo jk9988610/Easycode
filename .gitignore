@@ -10,10 +10,15 @@ __pycache__/
 *.bak
 
 release/
+<<<<<<< HEAD
+=======
+*.bak
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
 run.log
 
 # local API keys / test files
 agent-API
+<<<<<<< HEAD
 diffstat.txt
 updateplan.md
 
@@ -21,3 +26,15 @@ patch-*.cjs
 patch-*.py
 dev.log
 devtool-config.json 
+=======
+
+# local API keys / test files
+agent-API
+diffstat.txt
+run.log
+*.bak
+updateplan.md
+
+patch-*.cjs
+dev.log
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3

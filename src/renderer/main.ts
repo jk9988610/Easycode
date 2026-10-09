@@ -43,7 +43,10 @@ class App {
   });
   private workspace = "";
   private tabs: EditorTab[] = [];
+<<<<<<< HEAD
   private openTabsTimer: number | null = null;
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
   private gitFileStatus = new Map<string, string>();
   private editorDecorations: string[] = [];
   private activeTabId: string | null = null;
@@ -80,10 +83,13 @@ class App {
   private chatMessages: ChatMessage[] = [];
   private chatRunning = false;
   private chatSessionId: string | null = null;
+<<<<<<< HEAD
   private chatSessions: { id: string; title: string; updatedAt: number }[] = [];
   private persistSessionId: string | null = null;
   private persistCreatedAt = 0;
   private persistTimer: number | null = null;
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -184,8 +190,11 @@ class App {
 
     // Agent 事件流 → 聊天消息累积
     window.easycode.onAgentEvent((data) => this.handleAgentEvent(data));
+<<<<<<< HEAD
     void this.restoreChatSession();
     void this.restoreOpenTabs();
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
     window.easycode.onAgentExit((data) => {
       if (data.id === this.chatSessionId) {
         this.chatRunning = false;
@@ -1685,7 +1694,10 @@ class App {
   }
 
   private renderTabs(): void {
+<<<<<<< HEAD
     this.scheduleSaveOpenTabs();
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
     const el = this.root.querySelector(".tabs");
     if (!el) return;
     if (!this.tabs.length) {
@@ -1929,7 +1941,10 @@ class App {
       this.editor.onDidChangeCursorPosition((e) => {
         this.cursorLabel = `Ln ${e.position.lineNumber}, Col ${e.position.column}`;
         this.renderStatus();
+<<<<<<< HEAD
         this.scheduleSaveOpenTabs();
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
       });
       this.editor.onDidChangeModelContent(() => {
         if (this.ignoringModelChange) return;
@@ -1988,7 +2003,10 @@ class App {
   }
 
   private renderRightbar(): void {
+<<<<<<< HEAD
     this.schedulePersist();
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
     const body = this.root.querySelector(".rightbar-body") as HTMLElement | null;
     if (!body) return;
     const view = this.settings.rightView || "info";
@@ -2004,7 +2022,15 @@ class App {
   // --- Agent chat rendering & logic ---
 
   private renderChatHtml(): string {
+<<<<<<< HEAD
     const messages = this.renderChatBlocks();
+=======
+    const messages = this.chatMessages.length
+      ? this.chatMessages
+          .map((m) => this.renderChatMessage(m))
+          .join("")
+      : `<div class="chat-empty">开始新的对话</div>`;
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
     const apiKeyOk = !!this.settings.agentApiKey;
     const placeholder = apiKeyOk
       ? "描述任务,支持多轮对话。例如:读取 main.ts,然后给它加注释"
@@ -2013,6 +2039,7 @@ class App {
     const hasHistory = this.chatMessages.length > 0;
     return `
       <div class="chat-pane">
+<<<<<<< HEAD
         <div class="chat-header">
           <select data-chat-sessions title="历史对话">
             ${this.chatSessions.length
@@ -2021,6 +2048,8 @@ class App {
           </select>
           <button type="button" data-chat-new title="新建对话">+ 新建</button>
         </div>
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
         <div class="chat-stream" data-chat-stream>
           ${messages}
         </div>
@@ -2044,6 +2073,7 @@ class App {
       </div>`;
   }
 
+<<<<<<< HEAD
   private renderChatBlocks(): string {
     const parts: string[] = [];
     const PIC = String.fromCharCode(0x1F4DD);
@@ -2132,12 +2162,15 @@ class App {
     return out.join("");
   }
 
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
   private renderChatMessage(m: ChatMessage): string {
     const esc = escapeHtml;
     if (m.kind === "thinking")
       return `<div class="chat-msg thinking"><span class="chat-icon">💭</span><span>${esc(
         m.text || "",
       )}</span></div>`;
+<<<<<<< HEAD
     if (m.kind === "tool_call") {
       let argsHtml = esc(m.toolArgs || "");
       try {
@@ -2150,6 +2183,12 @@ class App {
       } catch { /* ignore */ }
       return `<div class="chat-msg tool-call"><span class="chat-icon">🔧</span><span><b>${esc(m.toolName || "")}</b>(${argsHtml})</span></div>`;
     }
+=======
+    if (m.kind === "tool_call")
+      return `<div class="chat-msg tool-call"><span class="chat-icon">🔧</span><span><b>${esc(
+        m.toolName || "",
+      )}</b>(${esc(m.toolArgs || "")})</span></div>`;
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
     if (m.kind === "tool_result")
       return `<div class="chat-msg tool-result"><span class="chat-icon">📄</span><pre class="chat-pre">${esc(
         (m.toolResult || "").slice(0, 500),
@@ -2183,6 +2222,7 @@ class App {
     stopBtn?.addEventListener("click", () => this.stopChat());
     clearBtn?.addEventListener("click", () => void this.clearChat());
     body.querySelector("[data-chat-rollback-bar]")?.addEventListener("click", () => void this.rollbackChat());
+<<<<<<< HEAD
     const _sel = body.querySelector("[data-chat-sessions]") as HTMLSelectElement | null;
     _sel?.addEventListener("change", () => void this.switchChatSession(_sel.value));
     body.querySelector("[data-chat-new]")?.addEventListener("click", () => void this.newChatSession());
@@ -2193,6 +2233,8 @@ class App {
         if (p) void this.openFile(p);
       });
     });
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
     input?.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
@@ -2206,6 +2248,7 @@ class App {
     if (stream) stream.scrollTop = stream.scrollHeight;
   }
 
+<<<<<<< HEAD
   private buildChatPayload(userText: string): string {
     const tab = this.activeTab();
     if (!tab || tab.kind === "diff") return userText;
@@ -2241,6 +2284,8 @@ class App {
     return header + selBlock + NL2 + "用户问题: " + userText;
   }
 
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
   private async sendChatMessage(): Promise<void> {
     const input = this.root.querySelector(
       "[data-chat-input]",
@@ -2250,7 +2295,10 @@ class App {
     if (!task || this.chatRunning) return;
     input.value = "";
     this.chatRunning = true;
+<<<<<<< HEAD
     const payload = this.buildChatPayload(task);
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
 
     // 显示用户消息
     this.chatMessages.push({ ts: Date.now(), kind: "final", text: `📝 ${task}` });
@@ -2261,7 +2309,11 @@ class App {
         // 首条消息:启动交互式会话,会话就绪后自动发送
         this.chatSessionId = await window.easycode.agentStart();
       }
+<<<<<<< HEAD
       await window.easycode.agentSend(this.chatSessionId, payload);
+=======
+      await window.easycode.agentSend(this.chatSessionId, task);
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
     } catch (e) {
       this.chatMessages.push({
         ts: Date.now(),
@@ -2274,6 +2326,7 @@ class App {
     this.renderRightbar();
   }
 
+<<<<<<< HEAD
   private async restoreChatSession(): Promise<void> {
     try {
       const list = await window.easycode.listSessions();
@@ -2435,14 +2488,19 @@ class App {
     this.renderRightbar();
   }
 
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
   private async clearChat(): Promise<void> {
     if (this.chatSessionId) {
       await window.easycode.agentClear(this.chatSessionId);
     }
     this.chatMessages = [];
     this.chatRunning = false;
+<<<<<<< HEAD
     this.persistSessionId = null;
     this.persistCreatedAt = 0;
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
     this.renderRightbar();
   }
 

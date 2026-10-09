@@ -1594,9 +1594,12 @@ button.status-item:hover {
 
 .chat-pane {
   height: 100%;
+<<<<<<< HEAD
   display: flex;
   flex-direction: column;
   overflow: hidden;
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
 }
 
 .chat-bubble {
@@ -2234,6 +2237,7 @@ button.status-item:hover {
 
 .git-modified-gutter { border-left: 3px solid #58a6ff; margin-left: 2px; }
 .git-deleted-gutter { border-left: 3px solid #f85149; margin-left: 2px; }
+<<<<<<< HEAD
 
 /* chat header + fixed panes (multi-session UI) */
 .chat-header {
@@ -2297,3 +2301,5 @@ button.status-item:hover {
 .chat-work-body { padding-left: 8px; border-left: 2px solid #333; margin-top: 2px; }
 .chat-file-link { color: #4ea1ff; text-decoration: none; border-bottom: 1px dotted #4ea1ff; cursor: pointer; }
 .chat-file-link:hover { color: #7dc0ff; }
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3

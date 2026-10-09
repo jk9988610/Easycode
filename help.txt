@@ -42,6 +42,7 @@ EasyCode DevTool — 使用指南（给 AI 助手看）
 - patch 脚本要幂等：先检测锚点是否存在，已存在就跳过
 - patch 脚本要能在 devtool 里直接运行（用 CommonJS require）
 - 中文字符保存为 UTF-8，不要 BOM
+<<<<<<< HEAD
 
 ═══ 智能运行（🚀） ═══
 位置：文件操作 tab 和 Patch tab 各有一个「🚀 智能运行」按钮。
@@ -61,3 +62,5 @@ EasyCode DevTool — 使用指南（给 AI 助手看）
 - 文件操作：一段包含 ```json [...] ``` 的回复
 - Patch 运行：提到 patch-xxx.cjs 文件名即可
 - 支持整段复制 AI 的回复（含说明文字），智能运行会自动提取代码块
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3

@@ -21,7 +21,10 @@ import {
   gitRevParseHead,
   gitIsDirty,
   gitStashPush,
+<<<<<<< HEAD
   gitStashApply,
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
   gitStashPop,
   gitStashDrop,
   gitResetHard,
@@ -161,7 +164,10 @@ export class AgentHost {
     let stashRef: string | null = null;
     if (dirty) {
       const stash = await gitStashPush(cwd, `easycode-agent-${id}-${Date.now()}`);
+<<<<<<< HEAD
       if (stash.ref) await gitStashApply(cwd, stash.ref);
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
       if (stash.ok && stash.ref) stashRef = stash.ref;
     }
     this.checkpoints.set(id, { cwd, headSha, stashRef });

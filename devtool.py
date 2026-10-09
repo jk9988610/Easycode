@@ -2,11 +2,15 @@
 EasyCode DevTool — 可视化 patch / 文件操作 / typecheck / commit （深色主题）
 """
 import os
+<<<<<<< HEAD
 import sys
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
 import json
 import time
 import shutil
 import threading
+<<<<<<< HEAD
 import re
 import subprocess
 
@@ -102,6 +106,9 @@ def _rewrite_shell_cmd(cmd):
     return cmd
 
 
+=======
+import subprocess
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
 
@@ -175,6 +182,7 @@ def apply_dark_theme(root):
     root.option_add("*TCombobox*Listbox.borderWidth", "0")
 
 
+<<<<<<< HEAD
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "devtool-config.json")
 
 def _load_cfg():
@@ -191,6 +199,8 @@ def _save_cfg(cfg):
     except Exception:
         pass
 
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
 class App:
     def __init__(self, root):
         self.root = root
@@ -248,8 +258,11 @@ class App:
         self.patch_combo.pack(side="left", padx=(0, 6))
         ttk.Button(f1, text="🔄 刷新", command=self.refresh_patches, width=8).pack(side="left", padx=2)
         ttk.Button(f1, text="▶ 运行 Patch", command=self.run_patch, width=12).pack(side="left", padx=2)
+<<<<<<< HEAD
         self.auto_tc_var = tk.BooleanVar(value=_load_cfg().get("auto_typecheck", True))
         ttk.Checkbutton(f1, text="patch 后自动 typecheck", variable=self.auto_tc_var, command=self._on_auto_tc_toggle).pack(side="left", padx=8)
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
         ttk.Button(f1, text="🔍 Typecheck", command=self.run_typecheck, width=12).pack(side="left", padx=2)
 
         f2 = ttk.LabelFrame(self.tab_patch, text="② 提交", padding=10)
@@ -264,8 +277,11 @@ class App:
         f3.pack(fill="x", padx=12, pady=4)
         ttk.Button(f3, text="▶ Patch + Typecheck",
                    command=self.run_all_patch_check, width=26).pack(side="left", padx=4)
+<<<<<<< HEAD
         ttk.Button(f3, text="🚀 智能运行",
                    command=lambda: self.smart_run("patch"), width=18).pack(side="left", padx=6)
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
         ttk.Button(f3, text="▶ Patch + Typecheck + 提交",
                    command=self.run_full, width=30).pack(side="left", padx=4)
 
@@ -308,7 +324,10 @@ class App:
         ttk.Button(bar, text="📂 从 devtasks.json 加载", command=self.load_devtasks).pack(side="left")
         ttk.Button(bar, text="📋 示例", command=self.load_example).pack(side="left", padx=6)
         ttk.Button(bar, text="🗑 清空", command=lambda: self.ops_text.delete("1.0", "end")).pack(side="left")
+<<<<<<< HEAD
         ttk.Button(bar, text="📋 粘贴剪贴板", command=self.paste_from_clipboard, width=16).pack(side="left", padx=6)
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
 
         self.ops_text = scrolledtext.ScrolledText(
             self.tab_files, height=16, wrap="word", font=("Consolas", 10),
@@ -324,14 +343,18 @@ class App:
                    command=self.run_file_ops, width=20).pack(side="left", padx=2)
         ttk.Button(bottom, text="⚡ 一键运行",
                    command=self.run_oneclick, width=18).pack(side="left", padx=6)
+<<<<<<< HEAD
         ttk.Button(bottom, text="🚀 智能运行",
                    command=lambda: self.smart_run("files"), width=18).pack(side="left", padx=6)
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
         ttk.Button(bottom, text="▶ 执行 + Patch + Typecheck",
                    command=self.run_ops_patch_check, width=30).pack(side="left", padx=6)
 
     # ================= 通用 =================
     def log(self, text):
         def _do():
+<<<<<<< HEAD
             out = text
             # filter CRLF warnings
             if "warning: LF will be replaced" in out or "warning: in the working copy" in out:
@@ -342,6 +365,10 @@ class App:
                     return
             self.output.insert("end", out)
             if not out.endswith("\n"):
+=======
+            self.output.insert("end", text)
+            if not text.endswith("\n"):
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
                 self.output.insert("end", "\n")
             self.output.see("end")
         self.root.after(0, _do)
@@ -349,6 +376,7 @@ class App:
     def clear_log(self):
         self.output.delete("1.0", "end")
 
+<<<<<<< HEAD
     def paste_from_clipboard(self):
         try:
             content = self.root.clipboard_get()
@@ -516,6 +544,8 @@ class App:
         self.log("如要执行当前内容，请手动编辑为上述格式后点「▶ 执行文件操作」。")
         self.set_status("未识别出明确指令，已填入输入框")
 
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
     def copy_all(self):
         text = self.output.get("1.0", "end").rstrip()
         self.root.clipboard_clear()
@@ -531,9 +561,14 @@ class App:
         self.root.after(0, lambda: self.status_var.set(t))
 
     def run_cmd(self, cmd, cwd=ROOT):
+<<<<<<< HEAD
         if cmd:
             cmd = list(cmd)
             cmd[0] = _resolve_exe(cmd[0])
+=======
+        if os.name == "nt" and cmd and cmd[0] in ("npm", "npx"):
+            cmd = [cmd[0] + ".cmd"] + cmd[1:]
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
         self.log("$ " + " ".join(cmd))
         try:
             p = subprocess.run(
@@ -554,9 +589,14 @@ class App:
     def refresh_patches(self):
         try:
             files = sorted(
+<<<<<<< HEAD
                 (f for f in os.listdir(ROOT)
                  if f.startswith("patch-") and (f.endswith(".py") or f.endswith(".cjs"))),
                 key=lambda f: (0 if f.endswith(".py") else 1, f),
+=======
+                f for f in os.listdir(ROOT)
+                if f.startswith("patch-") and f.endswith(".cjs")
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
             )
         except OSError:
             files = []
@@ -573,6 +613,7 @@ class App:
     def _bg_patch(self, name):
         self.clear_log()
         self.set_status("运行 patch...")
+<<<<<<< HEAD
         c = self.run_cmd(_patch_cmd(name))
         self.log("✅ Patch 成功\n" if c == 0 else "❌ Patch 失败\n")
         self.set_status("patch 完成" if c == 0 else "patch 失败")
@@ -590,6 +631,11 @@ class App:
 
     def _on_auto_tc_toggle(self):
         self._save_setting("auto_typecheck", bool(self.auto_tc_var.get()))
+=======
+        c = self.run_cmd(["node", name])
+        self.log("✅ Patch 成功\n" if c == 0 else "❌ Patch 失败\n")
+        self.set_status("patch 完成" if c == 0 else "patch 失败")
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
 
     def run_typecheck(self):
         threading.Thread(target=self._bg_typecheck, daemon=True).start()
@@ -636,7 +682,11 @@ class App:
     def _bg_patch_check(self, name):
         self.clear_log()
         self.set_status("Patch 中...")
+<<<<<<< HEAD
         if self.run_cmd(_patch_cmd(name)) != 0:
+=======
+        if self.run_cmd(["node", name]) != 0:
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
             self.log("❌ Patch 失败\n")
             self.set_status("Patch 失败")
             return
@@ -662,7 +712,11 @@ class App:
     def _bg_full(self, name, msg):
         self.clear_log()
         self.set_status("① Patch...")
+<<<<<<< HEAD
         if self.run_cmd(_patch_cmd(name)) != 0:
+=======
+        if self.run_cmd(["node", name]) != 0:
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
             self.log("❌ Patch 失败\n")
             return
         self.log("✅ Patch 成功\n\n")
@@ -710,7 +764,10 @@ class App:
         threading.Thread(target=self._bg_file_ops, daemon=True).start()
 
     def _bg_file_ops(self):
+<<<<<<< HEAD
         self.clear_log()  # bg_file_ops_clear_log_fixed
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
         raw = self.ops_text.get("1.0", "end").strip()
         if not raw:
             return self.root.after(0, lambda: messagebox.showwarning("提示", "JSON 为空"))
@@ -726,10 +783,13 @@ class App:
         ok, fail = self._exec_tasks(tasks)
         self.log(f"\n完成: {ok} 成功, {fail} 失败\n")
         self.set_status(f"{ok} 成功 / {fail} 失败")
+<<<<<<< HEAD
         if getattr(self, "_auto_copy_after_run", False):
             self._auto_copy_after_run = False
             self.root.after(80, self._copy_silent)
             self.set_status("文件操作完成，输出已复制到剪贴板")
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
 
     def _exec_tasks(self, tasks):
         ok, fail = 0, 0
@@ -768,7 +828,10 @@ class App:
                     cmd = t.get("cmd", "")
                     if not cmd:
                         raise ValueError("empty cmd")
+<<<<<<< HEAD
                     cmd = _rewrite_shell_cmd(cmd)
+=======
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
                     self.log(f"[{i}] shell  $ {cmd}")
                     sp = subprocess.run(
                         cmd, cwd=ROOT, shell=True, capture_output=True,
@@ -843,7 +906,11 @@ class App:
 
         # ③ 运行 Patch
         self.set_status(f"③ 运行 {name} ...")
+<<<<<<< HEAD
         if self.run_cmd(_patch_cmd(name)) != 0:
+=======
+        if self.run_cmd(["node", name]) != 0:
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
             self.log("❌ Patch 失败\n")
             self.root.after(0, self._copy_silent)
             self.set_status("Patch 失败，输出已复制")
@@ -873,7 +940,11 @@ class App:
             except Exception as e:
                 self.log(f"[JSON 解析失败] {e}\n")
         self.set_status("② Patch...")
+<<<<<<< HEAD
         if self.run_cmd(_patch_cmd(name)) != 0:
+=======
+        if self.run_cmd(["node", name]) != 0:
+>>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
             self.log("❌ Patch 失败\n")
             return
         self.log("✅ Patch 成功\n\n")
