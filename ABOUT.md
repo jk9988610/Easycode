@@ -5,7 +5,7 @@
 **EasyCode** —— 基于 Electron + Monaco 的桌面代码编辑器，仿 VS Code 界面，内置可自举的 AI Agent。核心卖点是 **Agent 能改自己**：既能改业务代码，也能改自身代码，并自动验证、可回滚。
 
 - **GitHub**: https://github.com/jk9988610/Easycode
-- **版本**: `0.1.0`（package.json）
+- **版本**: `0.2.0`（package.json）
 ---
 
 ## 二、技术栈
@@ -107,6 +107,7 @@ updateplan.md             历史规划笔记
 ### 🤖 Agent（核心）
 - ✅ 交互模式（长对话，子进程常驻）
 - ✅ 5 个工具：`read_file` / `write_file` / `edit_file` / `list_dir` / `run_command`
+- ✅ **edit_file 支持 LF/CRLF 跨换行匹配**（按文件风格自动重试）
 - ✅ 事件流 JSONL（thinking / tool_call / tool_result / final）
 - ✅ **每轮开始前自动 git stash 检查点**（Step 1）
 - ✅ **改 `agent-core/*.py` 后自动 `py_compile` 校验**（Step 2）
@@ -120,6 +121,7 @@ updateplan.md             历史规划笔记
 - ✅ **⚡ 一键运行**：写文件 → 切 tab → 选脚本 → 跑 patch → 复制输出
 - ✅ Patch & Commit：跑 patch、typecheck、git 提交
 - ✅ 深色主题
+- ✅ **自动探测 node.exe**：NODE_EXE → PATH → 常见路径 → 注册表
 
 ---
 
@@ -129,7 +131,6 @@ updateplan.md             历史规划笔记
 |---|---|---|
 | 🔴 | **会话持久化**：`sessionStore.ts` + IPC 已就绪，但 renderer 端没接（`listSessions` 没被调用） | 半成品 |
 | 🟠 | **正式打包**：`electron-builder` 需挂代理下载 Electron / NSIS 二进制 | 未跑通 |
-| 🟠 | **edit_file CRLF 兼容**：Agent 传 LF 的 `old_text` 匹配不上 CRLF 文件 | 已知 bug |
 | 🟡 | **多会话 UI**：新建 / 切换 / 删除会话 | 未开始 |
 | 🟡 | **上下文注入**：自动带上"当前打开的文件 / 选中的代码" | 未开始 |
 | 🟡 | **Diff 预览**：Agent 改文件前先弹 diff 让用户确认 | 未开始 |

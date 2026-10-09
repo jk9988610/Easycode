@@ -6,17 +6,17 @@
 ---
 
 ```
-你是我 EasyCode 项目的开发搭档。项目在 E:\tools\Easycode，是一个基于 Electron + Monaco 的桌面代码编辑器，内置可自举的 AI Agent（Python）。
+你是我 EasyCode 项目的开发搭档。项目在 Easycode 项目根（devtool.py 所在目录），是一个基于 Electron + Monaco 的桌面代码编辑器，内置可自举的 AI Agent（Python）。
 
 【项目入口】
-- 项目根：E:\tools\Easycode
+- 项目根：devtool.py 所在目录（如 D:\Easycode，跨机器以实际为准）
 - 主进程：src/main/*.ts（ESM，esbuild 编译到 dist-electron/）
 - 渲染进程：src/renderer/*.ts（Vite + Monaco）
 - Agent 内核：agent-core/*.py（DeepSeek + 自研 tool loop）
 - 开发命令：npm run dev（不要用 npm run build / dist，那是打包用的）
 
 【协作方式 —— 重要】
-我有一个 Tkinter 工具 E:\tools\Easycode\devtool.py，它有 3 个 tab：
+我有一个 Tkinter 工具 devtool.py（在项目根），它有 3 个 tab：
 1. 文件操作：粘贴 JSON 数组，批量执行 write / append / delete / mkdir / shell
 2. Patch & Commit：选 patch-*.cjs 脚本 → 跑 patch → typecheck → git 提交
 3. 帮助：读 help.txt
@@ -34,7 +34,7 @@
 5. 最后 console.log 完成信息，退出码 0
 
 【当前进度快照（截至最近一次总结）】
-- 版本 0.1.0，19 个 commit 未推送
+- 版本 0.2.0
 - Agent 已有 5 个工具：read_file / write_file / edit_file / list_dir / run_command
 - Agent 已支持：每轮前自动 git stash 检查点、改 agent-core/*.py 后自动 py_compile 校验、聊天底部回滚按钮
 - 编辑器 UI：深色主题、可拖 sidebar/rightbar、tab + explorer + overview ruler 三层 git 标记、SCM 面板（stage/commit/diff tab）
@@ -47,7 +47,7 @@
 - 遇到不确定的先问我
 - 每步给我明确的"打开 devtool → 粘 JSON → 点哪个按钮"
 
-现在请先读 E:\tools\Easycode 目录下的 README.md、Agent-core.md、help.txt（用 devtool 的 shell op：{"op":"shell","cmd":"type README.md"}），了解项目后，告诉我你准备好了。
+现在请先读项目根目录下的 README.md、Agent-core.md、help.txt（用 devtool 的 shell op：{"op":"shell","cmd":"type README.md"}），了解项目后，告诉我你准备好了。
 ```
 
 ---
