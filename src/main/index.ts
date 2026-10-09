@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
+import { gitStatus, gitStage, gitUnstage, gitCommit, gitDiff, gitShow } from "./git";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -231,7 +232,14 @@ function registerIpc(): void {
     else fileWatcher?.unwatchWorkspace();
   });
 
-  ipcMain.handle("term:list", () => terminalHost?.list() ?? []);
+  ipcMain.handle("git:status", (_e, root: string) => gitStatus(root));
+ipcMain.handle("git:stage", (_e, root: string, paths: string[]) => gitStage(root, paths));
+ipcMain.handle("git:unstage", (_e, root: string, paths: string[]) => gitUnstage(root, paths));
+ipcMain.handle("git:commit", (_e, root: string, message: string) => gitCommit(root, message));
+ipcMain.handle("git:diff", (_e, root: string, path: string, staged: boolean) => gitDiff(root, path, staged));
+  ipcMain.handle("git:show", (_e, root: string, rev: string, path: string) => gitShow(root, rev, path));
+
+ipcMain.handle("term:list", () => terminalHost?.list() ?? []);
   ipcMain.handle("term:create", (_e, kind?: ShellKind, opts?: { cwd?: string; title?: string }) => {
     const s = loadSettings();
     const shell = kind || s.defaultTerminal || "powershell";

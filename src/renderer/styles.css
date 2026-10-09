@@ -2001,3 +2001,161 @@ button.status-item:hover {
   font-size: 13px;
   padding: 12px 0;
 }
+
+/* Source control panel */
+.scm-pane {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.scm-commit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.scm-message {
+  width: 100%;
+  resize: vertical;
+  background: var(--entry);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.scm-message::placeholder {
+  color: var(--muted);
+}
+
+.scm-message:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.scm-commit-btn {
+  align-self: flex-end;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.scm-commit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.scm-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 0 2px;
+}
+
+.scm-refresh {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.scm-refresh:hover {
+  background: #2a323a;
+  color: var(--ink);
+}
+
+.scm-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.scm-section-title {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 6px 4px 4px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.scm-count {
+  color: var(--muted);
+  font-weight: 400;
+  letter-spacing: normal;
+}
+
+.scm-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.scm-row:hover {
+  background: #2a323a;
+}
+
+.scm-status {
+  flex: 0 0 auto;
+  width: 14px;
+  text-align: center;
+  font-weight: 600;
+  font-family: Cascadia Mono, Consolas, monospace;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.scm-status-M { color: var(--accent); }
+.scm-status-A { color: var(--ok); }
+.scm-status-D { color: var(--danger); }
+.scm-status-U { color: var(--accent); }
+
+.scm-path {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+
+.scm-row:hover .scm-path {
+  color: var(--ink);
+}
+
+.scm-action {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+  opacity: 0;
+}
+
+.scm-row:hover .scm-action {
+  opacity: 1;
+}
+
+.scm-action:hover {
+  background: #3a4550;
+  color: var(--ink);
+}

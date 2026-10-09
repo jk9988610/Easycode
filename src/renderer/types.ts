@@ -78,6 +78,8 @@ export interface EditorTab {
   dirty: boolean;
   language: string;
   encoding: string;
+  kind?: "file" | "diff";
+  diffStaged?: boolean;
 }
 
 /** agent-core 事件 payload(主进程转发给渲染进程)。 */
@@ -189,6 +191,24 @@ export interface EasycodeApi {
   termWrite: (id: string, data: string) => Promise<void>;
   termResize: (id: string, cols: number, rows: number) => Promise<void>;
   termKill: (id: string) => Promise<void>;
+  gitStatus: (root: string) => Promise<{
+    ok: boolean;
+    error?: string;
+    branch?: string;
+    files: {
+      path: string;
+      index: string;
+      worktree: string;
+      staged: boolean;
+      unstaged: boolean;
+      untracked: boolean;
+    }[];
+  }>;
+  gitStage: (root: string, paths: string[]) => Promise<{ ok: boolean; message: string }>;
+  gitUnstage: (root: string, paths: string[]) => Promise<{ ok: boolean; message: string }>;
+  gitCommit: (root: string, message: string) => Promise<{ ok: boolean; message: string }>;
+  gitDiff: (root: string, path: string, staged: boolean) => Promise<{ ok: boolean; diff?: string; error?: string }>;
+  gitShow: (root: string, rev: string, path: string) => Promise<{ ok: boolean; content?: string; error?: string }>;
   // Agent (agent-core Python 子进程,交互式长对话)
   agentStart: () => Promise<string>;
   agentSend: (id: string, content: string) => Promise<void>;

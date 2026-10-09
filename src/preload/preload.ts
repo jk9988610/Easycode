@@ -154,6 +154,12 @@ const api = {
   termResize: (id: string, cols: number, rows: number) =>
     ipcRenderer.invoke("term:resize", id, cols, rows),
   termKill: (id: string) => ipcRenderer.invoke("term:kill", id),
+  gitStatus: (root: string) => ipcRenderer.invoke("git:status", root),
+  gitStage: (root: string, paths: string[]) => ipcRenderer.invoke("git:stage", root, paths),
+  gitUnstage: (root: string, paths: string[]) => ipcRenderer.invoke("git:unstage", root, paths),
+  gitCommit: (root: string, message: string) => ipcRenderer.invoke("git:commit", root, message),
+  gitDiff: (root: string, path: string, staged: boolean) => ipcRenderer.invoke("git:diff", root, path, staged),
+  gitShow: (root: string, rev: string, path: string) => ipcRenderer.invoke("git:show", root, rev, path),
   // Agent (agent-core Python 子进程,交互式长对话)
   agentStart: (): Promise<string> => ipcRenderer.invoke("agent:start"),
   agentSend: (id: string, content: string): Promise<void> =>

@@ -20,6 +20,7 @@ import {
   tasksPlaceholderHtml,
 } from "./placeholderViews";
 import { extensionsPanelHtml } from "./extensionsView";
+import { SourceControlPanel } from "./sourceControl";
 import type {
   ActivityId,
   AgentEventPayload,
@@ -34,6 +35,11 @@ class App {
   private root: HTMLElement;
   private settings!: AppSettings;
   private activity: ActivityId = "explorer";
+  private scmPanel = new SourceControlPanel({
+    getWorkspace: () => this.workspace,
+    showToast: (m) => this.showToast(m),
+    onOpenDiff: (p, s) => void this.openDiffTab(p, s),
+  });
   private workspace = "";
   private tabs: EditorTab[] = [];
   private activeTabId: string | null = null;
@@ -47,6 +53,7 @@ class App {
   private commandFilter = "";
   private commandIndex = 0;
   private editor: monaco.editor.IStandaloneCodeEditor | null = null;
+  private diffEditor: monaco.editor.IStandaloneDiffEditor | null = null;
   private editorEl: HTMLElement | null = null;
   private lsp: LspBridge;
   private changeTimer: number | null = null;
@@ -1179,7 +1186,7 @@ class App {
     if (!el) return;
     if (this.activity === "explorer") this.renderExplorer(el);
     else if (this.activity === "search") el.innerHTML = searchPlaceholderHtml();
-    else if (this.activity === "scm") el.innerHTML = scmPlaceholderHtml();
+    else if (this.activity === "scm") void this.scmPanel.render(el);
     else if (this.activity === "extensions") void this.renderExtensions(el);
     else if (this.activity === "account") el.innerHTML = accountPlaceholderHtml();
     else if (this.activity === "tasks") el.innerHTML = tasksPlaceholderHtml();
@@ -1661,9 +1668,95 @@ class App {
     );
   }
 
+
+  private async openDiffTab(filePath: string, staged: boolean): Promise<void> {
+    if (!this.workspace) return;
+    const id = `diff:${staged ? "s" : "u"}:${filePath}`;
+    const existing = this.tabs.find((t) => t.id === id);
+    if (existing) {
+      await this.refreshDiffTab(existing);
+      this.activeTabId = existing.id;
+      this.renderTabs();
+      this.renderEditorHost();
+      return;
+    }
+    const baseName = filePath.split(/[\\/]/).pop() || filePath;
+    const tab: EditorTab = {
+      id,
+      path: filePath,
+      name: `${baseName} (${staged ? "已暂存" : "更改"})`,
+      content: "",
+      original: "",
+      dirty: false,
+      language: languageFromPath(filePath),
+      encoding: "utf-8",
+      kind: "diff",
+      diffStaged: staged,
+    };
+    await this.refreshDiffTab(tab);
+    this.tabs.push(tab);
+    this.activeTabId = tab.id;
+    this.renderTabs();
+    this.renderBreadcrumbs();
+    this.renderEditorHost();
+    this.renderStatus();
+    if (this.activity === "explorer") this.renderSidebarBody();
+  }
+
+  private async refreshDiffTab(tab: EditorTab): Promise<void> {
+    if (!this.workspace) return;
+    const head = await window.easycode.gitShow(this.workspace, "HEAD", tab.path);
+    const index = await window.easycode.gitShow(this.workspace, ":0", tab.path);
+    if (tab.diffStaged) {
+      tab.original = head.ok ? head.content ?? "" : "";
+      tab.content = index.ok ? index.content ?? "" : "";
+    } else {
+      tab.original = index.ok ? index.content ?? "" : "";
+      try {
+        const res = await window.easycode.readFile(tab.path, {});
+        tab.content = res.content;
+      } catch {
+        tab.content = "";
+      }
+    }
+  }
+
+  private renderDiffTabHost(host: HTMLElement, tab: EditorTab): void {
+    this.disposeEditors();
+    host.innerHTML = `<div class="monaco" id="diff-root"></div>`;
+    const el = host.querySelector("#diff-root") as HTMLElement | null;
+    if (!el) return;
+    const originalModel = monaco.editor.createModel(
+      tab.original,
+      tab.language,
+      monaco.Uri.parse(`easycode-diff-original://${encodeURIComponent(tab.id)}`),
+    );
+    const modifiedModel = monaco.editor.createModel(
+      tab.content,
+      tab.language,
+      monaco.Uri.parse(`easycode-diff-modified://${encodeURIComponent(tab.id)}`),
+    );
+    this.diffEditor = monaco.editor.createDiffEditor(el, {
+      ...this.editorOptions(),
+      automaticLayout: true,
+      readOnly: true,
+      originalEditable: false,
+      renderSideBySide: true,
+    });
+    this.diffEditor.setModel({ original: originalModel, modified: modifiedModel });
+  }
+
   private renderEditorHost(): void {
     const host = this.root.querySelector(".editor-host") as HTMLElement;
     const tab = this.activeTab();
+    if (this.diffEditor && (!tab || tab.kind !== "diff")) {
+      this.diffEditor.dispose();
+      this.diffEditor = null;
+    }
+    if (tab?.kind === "diff") {
+      this.renderDiffTabHost(host, tab);
+      return;
+    }
     if (!tab) {
       this.disposeEditors();
       host.innerHTML = `
