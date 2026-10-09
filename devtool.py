@@ -7,6 +7,44 @@ import time
 import shutil
 import threading
 import subprocess
+
+
+def _find_node_exe():
+    import os as _os
+    import shutil as _sh
+    env = _os.environ.get("NODE_EXE")
+    if env and _os.path.exists(env):
+        return env
+    p = _sh.which("node")
+    if p:
+        return p
+    candidates = [
+        "C:/Program Files/nodejs/node.exe",
+        "C:/Program Files (x86)/nodejs/node.exe",
+        _os.path.expandvars("%LOCALAPPDATA%/Programs/nodejs/node.exe"),
+        _os.path.expandvars("%APPDATA%/nvm/node.exe"),
+        _os.path.expandvars("%USERPROFILE%/.volta/bin/node.exe"),
+    ]
+    for c in candidates:
+        if _os.path.exists(c):
+            return c
+    if _os.name == "nt":
+        try:
+            import winreg
+            for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+                try:
+                    with winreg.OpenKey(hive, "SOFTWARE" + chr(92) + "Node.js") as k:
+                        base, _ = winreg.QueryValueEx(k, "InstallPath")
+                        exe = _os.path.join(base, "node.exe")
+                        if _os.path.exists(exe):
+                            return exe
+                except OSError:
+                    pass
+        except ImportError:
+            pass
+    raise RuntimeError("Cannot find node.exe. Install Node.js or set NODE_EXE env var.")
+
+
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
 
@@ -238,6 +276,8 @@ class App:
         self.root.after(0, lambda: self.status_var.set(t))
 
     def run_cmd(self, cmd, cwd=ROOT):
+        if cmd and cmd[0] == "node":
+            cmd = [_find_node_exe()] + list(cmd[1:])
         if os.name == "nt" and cmd and cmd[0] in ("npm", "npx"):
             cmd = [cmd[0] + ".cmd"] + cmd[1:]
         self.log("$ " + " ".join(cmd))

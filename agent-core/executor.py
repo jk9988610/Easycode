@@ -92,14 +92,39 @@ def write_file(path: str, content: str, encoding: str = "utf-8") -> str:
         return f"[错误] 写入失败: {e}"
 
 
+def _normalize_newlines(text: str, use_crlf: bool) -> str:
+    """把 text 中所有换行统一成 use_crlf 指定的风格,便于跨换行风格匹配/写入。"""
+    unified = text.replace("\r\n", "\n").replace("\r", "\n")
+    if use_crlf:
+        return unified.replace("\n", "\r\n")
+    return unified
+
+
 def edit_file(path: str, old_text: str, new_text: str) -> str:
     try:
         full = safe_path(path)
         content, enc = _read_text(full)
-        if old_text not in content:
-            return "[错误] 未在文件中找到要替换的文本,请先 read_file 确认内容"
+        use_crlf = "\r\n" in content
+
+        candidates = [old_text]
+        if use_crlf and "\r\n" not in old_text:
+            candidates.append(old_text.replace("\n", "\r\n"))
+        if not use_crlf and "\r" in old_text:
+            candidates.append(old_text.replace("\r\n", "\n").replace("\r", "\n"))
+
+        matched = None
+        for cand in candidates:
+            if cand in content:
+                matched = cand
+                break
+        if matched is None:
+            return ("[错误] 未在文件中找到要替换的文本(已尝试 LF/CRLF 兼容),"
+                    "请先 read_file 确认内容")
+
+        new_normalized = _normalize_newlines(new_text, use_crlf)
+
         _backup(full)
-        content = content.replace(old_text, new_text, 1)
+        content = content.replace(matched, new_normalized, 1)
         with open(full, "w", encoding=enc, newline="") as f:
             f.write(content)
         return f"[成功] 已修改 {path}(编码: {enc},备份: {full}.bak)"
