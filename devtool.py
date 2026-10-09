@@ -2,6 +2,7 @@
 EasyCode DevTool — 可视化 patch / 文件操作 / typecheck / commit （深色主题）
 """
 import os
+import sys
 import json
 import time
 import shutil
@@ -62,6 +63,9 @@ def _resolve_exe(name):
         if _os.path.exists(target):
             return target
         return name
+    if name in ("python", "python3", "python.exe"):
+        import sys as _sys
+        return _sys.executable
     if name in ("tsc", "tsc.cmd"):
         local = _os.path.join(ROOT, "node_modules", ".bin", "tsc.cmd")
         if _os.path.exists(local):
@@ -69,6 +73,17 @@ def _resolve_exe(name):
         return name
     return name
 
+
+def _patch_cmd(name):
+    if name.endswith(".py"):
+        import sys as _sys
+        return [_sys.executable, name]
+    if name.endswith(".cjs"):
+        try:
+            return [_find_node_exe(), name]
+        except RuntimeError:
+            return ["node", name]
+    return ["node", name]
 
 def _rewrite_shell_cmd(cmd):
     if not cmd:
@@ -373,10 +388,19 @@ class App:
         idx = text.find("patch-")
         if idx < 0:
             return None
-        end = text.find(".cjs", idx)
-        if end < 0:
+        end_py = text.find(".py", idx)
+        end_cjs = text.find(".cjs", idx)
+        if end_py < 0 and end_cjs < 0:
             return None
-        candidate = text[idx:end + 4]
+        if end_py < 0:
+            end, ext_len = end_cjs, 4
+        elif end_cjs < 0:
+            end, ext_len = end_py, 3
+        elif end_py < end_cjs:
+            end, ext_len = end_py, 3
+        else:
+            end, ext_len = end_cjs, 4
+        candidate = text[idx:end + ext_len]
         for ch in candidate:
             if ch in " " + chr(9) + chr(13) + chr(10):
                 return None
@@ -457,8 +481,9 @@ class App:
     def refresh_patches(self):
         try:
             files = sorted(
-                f for f in os.listdir(ROOT)
-                if f.startswith("patch-") and f.endswith(".cjs")
+                (f for f in os.listdir(ROOT)
+                 if f.startswith("patch-") and (f.endswith(".py") or f.endswith(".cjs"))),
+                key=lambda f: (0 if f.endswith(".py") else 1, f),
             )
         except OSError:
             files = []
@@ -475,7 +500,7 @@ class App:
     def _bg_patch(self, name):
         self.clear_log()
         self.set_status("运行 patch...")
-        c = self.run_cmd(["node", name])
+        c = self.run_cmd(_patch_cmd(name))
         self.log("✅ Patch 成功\n" if c == 0 else "❌ Patch 失败\n")
         self.set_status("patch 完成" if c == 0 else "patch 失败")
         if getattr(self, "_auto_copy_after_run", False):
@@ -530,7 +555,7 @@ class App:
     def _bg_patch_check(self, name):
         self.clear_log()
         self.set_status("Patch 中...")
-        if self.run_cmd(["node", name]) != 0:
+        if self.run_cmd(_patch_cmd(name)) != 0:
             self.log("❌ Patch 失败\n")
             self.set_status("Patch 失败")
             return
@@ -556,7 +581,7 @@ class App:
     def _bg_full(self, name, msg):
         self.clear_log()
         self.set_status("① Patch...")
-        if self.run_cmd(["node", name]) != 0:
+        if self.run_cmd(_patch_cmd(name)) != 0:
             self.log("❌ Patch 失败\n")
             return
         self.log("✅ Patch 成功\n\n")
@@ -737,7 +762,7 @@ class App:
 
         # ③ 运行 Patch
         self.set_status(f"③ 运行 {name} ...")
-        if self.run_cmd(["node", name]) != 0:
+        if self.run_cmd(_patch_cmd(name)) != 0:
             self.log("❌ Patch 失败\n")
             self.root.after(0, self._copy_silent)
             self.set_status("Patch 失败，输出已复制")
@@ -767,7 +792,7 @@ class App:
             except Exception as e:
                 self.log(f"[JSON 解析失败] {e}\n")
         self.set_status("② Patch...")
-        if self.run_cmd(["node", name]) != 0:
+        if self.run_cmd(_patch_cmd(name)) != 0:
             self.log("❌ Patch 失败\n")
             return
         self.log("✅ Patch 成功\n\n")
