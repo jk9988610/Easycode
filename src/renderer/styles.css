@@ -2271,3 +2271,21 @@ button.status-item:hover {
 .chat-composer {
   flex-shrink: 0;
 }
+
+.chat-md { flex: 1; min-width: 0; color: inherit; }
+.chat-md-p { margin: 2px 0; line-height: 1.5; word-break: break-word; white-space: pre-wrap; }
+.chat-md-sp { height: 4px; }
+.chat-md-h { font-weight: 600; margin: 6px 0 2px; }
+.chat-md-h1 { font-size: 15px; }
+.chat-md-h2 { font-size: 14px; }
+.chat-md-h3 { font-size: 13px; }
+.chat-md-h4, .chat-md-h5, .chat-md-h6 { font-size: 12px; color: #aaa; }
+.chat-md-ul { margin: 2px 0; padding-left: 18px; }
+.chat-md-ul li { margin: 1px 0; line-height: 1.5; }
+.chat-md-code { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 4px; padding: 6px 8px; margin: 4px 0; overflow-x: auto; font-family: Consolas, monospace; font-size: 12px; white-space: pre; }
+.chat-md-inline { background: #1a1a1a; border-radius: 3px; padding: 1px 4px; font-family: Consolas, monospace; font-size: 12px; }
+.chat-msg.thinking.collapsed { background: transparent; padding: 2px 0; }
+.chat-think-summary { cursor: pointer; color: #888; font-size: 12px; user-select: none; list-style: none; }
+.chat-think-summary:hover { color: #ccc; }
+.chat-think-summary::-webkit-details-marker { display: none; }
+.chat-think-body { margin-top: 4px; padding-left: 8px; border-left: 2px solid #333; color: #aaa; font-size: 12px; }

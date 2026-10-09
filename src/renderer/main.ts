@@ -2004,9 +2004,33 @@ class App {
   // --- Agent chat rendering & logic ---
 
   private renderChatHtml(): string {
+    const _collapsedIdx = new Set<number>();
+    {
+      const _openIdx: number[] = [];
+      for (let i = 0; i < this.chatMessages.length; i++) {
+        const k = this.chatMessages[i].kind;
+        if (k === "thinking") _openIdx.push(i);
+        else if (k === "final" || k === "error") {
+          for (const j of _openIdx) _collapsedIdx.add(j);
+          _openIdx.length = 0;
+        }
+      }
+    }
     const messages = this.chatMessages.length
       ? this.chatMessages
-          .map((m) => this.renderChatMessage(m))
+          .map((m, i) => {
+            let html = this.renderChatMessage(m);
+            if (m.kind === "final" && m.text && !m.text.startsWith("📝 ")) {
+              const head = html.match(/^(<div class="chat-msg final"><span class="chat-icon">[^<]*<\/span>)/);
+              if (head) {
+                html = head[1] + `<div class="chat-md">${this.renderMiniMarkdown(m.text)}</div></div>`;
+              }
+            }
+            if (m.kind === "thinking" && _collapsedIdx.has(i)) {
+              html = `<details class="chat-msg thinking collapsed"><summary class="chat-think-summary">💭 思考过程（点击展开）</summary><div class="chat-think-body">${html}</div></details>`;
+            }
+            return html;
+          })
           .join("")
       : `<div class="chat-empty">开始新的对话</div>`;
     const apiKeyOk = !!this.settings.agentApiKey;
@@ -2046,6 +2070,44 @@ class App {
           </div>
         </div>
       </div>`;
+  }
+
+  private renderMiniMarkdown(text: string): string {
+    if (!text) return "";
+    const NL2 = String.fromCharCode(10);
+    const esc = escapeHtml;
+    const lines = text.split(/\r?\n/);
+    const out: string[] = [];
+    let inCode = false;
+    let codeBuf: string[] = [];
+    let inList = false;
+    const flushList = () => { if (inList) { out.push("</ul>"); inList = false; } };
+    const flushCode = () => { if (inCode) { out.push(`<pre class="chat-md-code"><code>${esc(codeBuf.join(NL2))}</code></pre>`); codeBuf = []; inCode = false; } };
+    const inline = (s: string): string => {
+      let r = esc(s);
+      r = r.replace(/`([^`]+)`/g, '<code class="chat-md-inline">$1</code>');
+      r = r.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+      r = r.replace(/(^|[^*])\*([^*]+)\*/g, '$1<i>$2</i>');
+      r = r.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+      return r;
+    };
+    for (const line of lines) {
+      if (line.startsWith("```")) {
+        if (inCode) flushCode(); else { flushList(); inCode = true; }
+        continue;
+      }
+      if (inCode) { codeBuf.push(line); continue; }
+      const h = line.match(/^(#{1,6})\s+(.*)$/);
+      if (h) { flushList(); const lv = h[1].length; out.push(`<div class="chat-md-h chat-md-h${lv}">${inline(h[2])}</div>`); continue; }
+      const li = line.match(/^\s*[-*]\s+(.*)$/);
+      if (li) { if (!inList) { out.push('<ul class="chat-md-ul">'); inList = true; } out.push(`<li>${inline(li[1])}</li>`); continue; }
+      flushList();
+      if (!line.trim()) { out.push('<div class="chat-md-sp"></div>'); continue; }
+      out.push(`<div class="chat-md-p">${inline(line)}</div>`);
+    }
+    flushCode();
+    flushList();
+    return out.join("");
   }
 
   private renderChatMessage(m: ChatMessage): string {
