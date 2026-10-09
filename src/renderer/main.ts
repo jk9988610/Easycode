@@ -2103,6 +2103,49 @@ class App {
     if (stream) stream.scrollTop = stream.scrollHeight;
   }
 
+  private buildChatPayload(userText: string): string {
+    const tab = this.activeTab();
+    if (!tab || tab.kind === "diff") return userText;
+    let selText = "";
+    try {
+      const ed = this.editor;
+      if (ed && tab.path) {
+        const sel = ed.getSelection();
+        if (sel && !sel.isEmpty()) {
+          selText = ed.getModel()?.getValueInRange(sel) || "";
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    const lines = selText.split(chr(10));
+    const MAX = 500;
+    let selBlock = "";
+    if (selText) {
+      if (lines.length > MAX) {
+        const half = Math.floor(MAX / 2);
+        const head = lines.slice(0, half).join(chr(10));
+        const tail = lines.slice(-half).join(chr(10));
+        selBlock = "选中代码:
+```
+" + head + "
+... (省略 " + (lines.length - MAX) + " 行) ...
+" + tail + "
+```
+";
+      } else {
+        selBlock = "选中代码:
+```
+" + selText + "
+```
+";
+      }
+    }
+    const relPath = tab.path || tab.name;
+    const header = "[上下文] 当前文件: " + relPath + chr(10);
+    return header + selBlock + chr(10) + "用户问题: " + userText;
+  }
+
   private async sendChatMessage(): Promise<void> {
     const input = this.root.querySelector(
       "[data-chat-input]",
@@ -2112,6 +2155,7 @@ class App {
     if (!task || this.chatRunning) return;
     input.value = "";
     this.chatRunning = true;
+    const payload = this.buildChatPayload(task);
 
     // 显示用户消息
     this.chatMessages.push({ ts: Date.now(), kind: "final", text: `📝 ${task}` });
@@ -2122,7 +2166,7 @@ class App {
         // 首条消息:启动交互式会话,会话就绪后自动发送
         this.chatSessionId = await window.easycode.agentStart();
       }
-      await window.easycode.agentSend(this.chatSessionId, task);
+      await window.easycode.agentSend(this.chatSessionId, payload);
     } catch (e) {
       this.chatMessages.push({
         ts: Date.now(),
