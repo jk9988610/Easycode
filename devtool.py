@@ -177,13 +177,28 @@ def apply_dark_theme(root):
 
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "devtool-config.json")
 
+DEFAULT_WORK_DIR = ROOT
+
+
+def _default_cfg():
+    return {
+        "work_dir": DEFAULT_WORK_DIR,
+        "auto_typecheck": True,
+        "copy_after_run": True,
+        "smart_recognize": True,
+    }
+
+
 def _load_cfg():
+    cfg = _default_cfg()
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+        if isinstance(data, dict):
+            cfg.update(data)
     except Exception:
-        return {}
-
+        pass
+    return cfg
 def _save_cfg(cfg):
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -197,6 +212,19 @@ class App:
         root.title("EasyCode DevTool")
         root.geometry("1060x820")
         root.minsize(880, 640)
+
+        _geo = _load_cfg().get("window_geometry")
+        if _geo:
+            try:
+                root.geometry(_geo)
+            except Exception:
+                pass
+        root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        self._cfg = _load_cfg()
+        self.work_dir = self._cfg.get("work_dir") or DEFAULT_WORK_DIR
+        if not os.path.isdir(self.work_dir):
+            self.work_dir = DEFAULT_WORK_DIR
 
         apply_dark_theme(root)
 
@@ -214,10 +242,13 @@ class App:
         self.nb.add(self.tab_files, text="  文件操作  ")
         self.nb.add(self.tab_patch, text="  Patch & Commit  ")
         self.tab_help = ttk.Frame(self.nb)
+        self.tab_settings = ttk.Frame(self.nb)
+        self.nb.add(self.tab_settings, text="  设置  ")
         self.nb.add(self.tab_help, text="  帮助  ")
 
         self._build_files_tab()
         self._build_patch_tab()
+        self._build_settings_tab()
         self._build_help_tab()
 
         out = ttk.LabelFrame(root, text="输出", padding=8)
@@ -236,6 +267,8 @@ class App:
         ttk.Button(bar, text="📋 复制全部输出", command=self.copy_all).pack(side="right")
         ttk.Button(bar, text="🗑 清空", command=self.clear_log).pack(side="right", padx=6)
 
+        self._apply_font_recursive(self.root, self._cfg.get("font_family", "Consolas"), int(self._cfg.get("font_size", 10)))
+
         self.log("欢迎使用 EasyCode DevTool（深色主题）\n")
 
     # ================= Patch Tab =================
@@ -248,8 +281,6 @@ class App:
         self.patch_combo.pack(side="left", padx=(0, 6))
         ttk.Button(f1, text="🔄 刷新", command=self.refresh_patches, width=8).pack(side="left", padx=2)
         ttk.Button(f1, text="▶ 运行 Patch", command=self.run_patch, width=12).pack(side="left", padx=2)
-        self.auto_tc_var = tk.BooleanVar(value=_load_cfg().get("auto_typecheck", True))
-        ttk.Checkbutton(f1, text="patch 后自动 typecheck", variable=self.auto_tc_var, command=self._on_auto_tc_toggle).pack(side="left", padx=8)
         ttk.Button(f1, text="🔍 Typecheck", command=self.run_typecheck, width=12).pack(side="left", padx=2)
 
         f2 = ttk.LabelFrame(self.tab_patch, text="② 提交", padding=10)
@@ -270,6 +301,120 @@ class App:
                    command=self.run_full, width=30).pack(side="left", padx=4)
 
         self.refresh_patches()
+
+    # ================= 设置 Tab =================
+    def _build_settings_tab(self):
+        f = ttk.Frame(self.tab_settings)
+        f.pack(fill="both", expand=True, padx=12, pady=12)
+
+        g1 = ttk.LabelFrame(f, text="工作目录", padding=10)
+        g1.pack(fill="x", pady=(0, 10))
+        row1 = ttk.Frame(g1)
+        row1.pack(fill="x")
+        self.work_dir_var = tk.StringVar(value=self.work_dir)
+        ttk.Entry(row1, textvariable=self.work_dir_var).pack(side="left", fill="x", expand=True, padx=(0, 6))
+        # 改为在 Entry 上用 command bind
+        # (由后续 patch 追加)
+        _wde = row1.winfo_children()[-1] if False else None
+        ttk.Button(row1, text="浏览", command=self._browse_work_dir, width=10).pack(side="left")
+        ttk.Button(row1, text="应用", command=self._apply_work_dir, width=10).pack(side="left", padx=6)
+        ttk.Label(g1, text="所有文件操作、patch 运行、shell 命令默认在此目录下执行。",
+                  foreground=FG_MUTED).pack(anchor="w", pady=(6, 0))
+
+        gFont = ttk.LabelFrame(f, text="字体", padding=10)
+        gFont.pack(fill="x", pady=(0, 10))
+        rowF = ttk.Frame(gFont)
+        rowF.pack(fill="x")
+        ttk.Label(rowF, text="字体族:").pack(side="left")
+        self.font_family_var = tk.StringVar(value=self._cfg.get("font_family", "Consolas"))
+        ttk.Entry(rowF, textvariable=self.font_family_var, width=22).pack(side="left", padx=(6, 16))
+        ttk.Label(rowF, text="字号:").pack(side="left")
+        self.font_size_var = tk.StringVar(value=str(self._cfg.get("font_size", 10)))
+        ttk.Spinbox(rowF, from_=8, to=32, textvariable=self.font_size_var, width=6).pack(side="left", padx=6)
+        ttk.Button(rowF, text="应用字体", command=self._apply_font).pack(side="left", padx=6)
+        ttk.Label(gFont, text="应用到所有输出区、JSON 输入区（下次启动也生效）。", foreground=FG_MUTED).pack(anchor="w", pady=(6, 0))
+
+        g2 = ttk.LabelFrame(f, text="行为", padding=10)
+        g2.pack(fill="x", pady=(0, 10))
+        self.auto_tc_var = tk.BooleanVar(value=self._cfg.get("auto_typecheck", True))
+        ttk.Checkbutton(g2, text="patch 后自动运行 typecheck", variable=self.auto_tc_var,
+                        command=lambda: self._save_setting("auto_typecheck", bool(self.auto_tc_var.get()))
+                        ).pack(anchor="w", pady=2)
+        self.copy_after_var = tk.BooleanVar(value=self._cfg.get("copy_after_run", True))
+        ttk.Checkbutton(g2, text="每次执行后自动复制输出到剪贴板", variable=self.copy_after_var,
+                        command=lambda: self._save_setting("copy_after_run", bool(self.copy_after_var.get()))
+                        ).pack(anchor="w", pady=2)
+        self.smart_recog_var = tk.BooleanVar(value=self._cfg.get("smart_recognize", True))
+        ttk.Checkbutton(g2, text="智能运行：自动识别并运行刚写入的脚本 (.cjs/.js/.py/.ps1/.sh)",
+                        variable=self.smart_recog_var,
+                        command=lambda: self._save_setting("smart_recognize", bool(self.smart_recog_var.get()))
+                        ).pack(anchor="w", pady=2)
+
+        rowSrc = ttk.Frame(g2)
+        rowSrc.pack(anchor="w", pady=(6, 2))
+        ttk.Label(rowSrc, text="智能运行源:").pack(side="left")
+        self.source_pref_var = tk.StringVar(value=self._cfg.get("source_pref", "input_first"))
+        self.source_pref_combo = ttk.Combobox(rowSrc, textvariable=self.source_pref_var, width=18, state="readonly")
+        self.source_pref_combo["values"] = ("input_first", "clipboard_first", "ask")
+        self.source_pref_combo.pack(side="left", padx=6)
+        self.source_pref_combo.bind("<<ComboboxSelected>>", lambda e: self._apply_source_pref())
+
+        ttk.Label(g2, text="input_first=输入框优先 / clipboard_first=剪贴板优先 / ask=每次询问",
+                  foreground=FG_MUTED).pack(anchor="w", pady=(2, 0))
+
+        ttk.Label(f, text="配置文件: " + CONFIG_FILE, foreground=FG_MUTED).pack(anchor="w", pady=(10, 0))
+
+    def _browse_work_dir(self):
+        from tkinter import filedialog
+        cur = self.work_dir_var.get() or self.work_dir
+        d = filedialog.askdirectory(initialdir=cur, title="选择工作目录")
+        if d:
+            self.work_dir_var.set(d)
+
+    def _apply_work_dir(self):
+        d = self.work_dir_var.get().strip()
+        if not d or not os.path.isdir(d):
+            messagebox.showwarning("提示", "目录不存在: " + d)
+            return
+        self.work_dir = d
+        self._cfg["work_dir"] = d
+        self._save_setting("work_dir", d)
+        self.refresh_patches()
+        self.set_status("工作目录已切换到: " + d)
+        self.log("工作目录: " + d + "\n")
+
+    def _apply_font(self):
+        fam = (self.font_family_var.get() or "Consolas").strip()
+        try:
+            size = int(self.font_size_var.get())
+        except Exception:
+            size = 10
+        if size < 8 or size > 32:
+            size = 10
+        self._cfg["font_family"] = fam
+        self._cfg["font_size"] = size
+        self._save_setting("font_family", fam)
+        self._save_setting("font_size", size)
+        self._apply_font_recursive(self.root, fam, size)
+        self.set_status("字体已更新: " + fam + " " + str(size))
+        self.log("字体已更新: " + fam + " " + str(size) + "\n")
+
+    def _apply_source_pref(self):
+        v = self.source_pref_var.get()
+        if v not in ("input_first", "clipboard_first", "ask"):
+            v = "input_first"
+        self._cfg["source_pref"] = v
+        self._save_setting("source_pref", v)
+        self.set_status("智能运行源已设为: " + v)
+
+    def _apply_font_recursive(self, widget, fam, size):
+        try:
+            if isinstance(widget, tk.Text):
+                widget.configure(font=(fam, size))
+        except Exception:
+            pass
+        for child in widget.winfo_children():
+            self._apply_font_recursive(child, fam, size)
 
     # ================= 帮助 Tab =================
     def _build_help_tab(self):
@@ -322,8 +467,6 @@ class App:
         bottom.pack(fill="x", padx=12, pady=(0, 12))
         ttk.Button(bottom, text="▶ 执行文件操作",
                    command=self.run_file_ops, width=20).pack(side="left", padx=2)
-        ttk.Button(bottom, text="⚡ 一键运行",
-                   command=self.run_oneclick, width=18).pack(side="left", padx=6)
         ttk.Button(bottom, text="🚀 智能运行",
                    command=lambda: self.smart_run("files"), width=18).pack(side="left", padx=6)
         ttk.Button(bottom, text="▶ 执行 + Patch + Typecheck",
@@ -449,10 +592,34 @@ class App:
 
 
     def smart_run(self, source_tab):
-        content = self._get_clipboard()
+        box = self.ops_text.get("1.0", "end").strip()
+        clip = self._get_clipboard() or ""
+        pref = self.source_pref_var.get()
+        content = ""
+        source_label = ""
+        if pref == "clipboard_first":
+            content = clip or box
+            source_label = "剪贴板" if clip else ("输入框" if box else "")
+        elif pref == "ask" and box and clip:
+            from tkinter import messagebox as _mb
+            ans = _mb.askyesnocancel("选择源", "输入框和剪贴板都有内容。\n\n是=用输入框\n否=用剪贴板\n取消=中止")
+            if ans is None:
+                self.set_status("已取消")
+                return
+            if ans:
+                content = box
+                source_label = "输入框"
+            else:
+                content = clip
+                source_label = "剪贴板"
+        else:
+            content = box or clip
+            source_label = "输入框" if box else ("剪贴板" if clip else "")
         if not content:
-            self.set_status("剪贴板为空或不可读")
+            self.set_status("输入框和剪贴板都为空")
             return
+        self.log("[源: " + source_label + "]\n")
+        self.set_status("源: " + source_label)
         ops = self._try_parse_ops_json(content)
         if ops is None:
             blocks = self._extract_json_blocks(content)
@@ -467,7 +634,7 @@ class App:
             if source_tab != "files":
                 self.nb.select(self.tab_files)
             self._auto_copy_after_run = True
-            self.root.after(80, self.run_file_ops)
+            self.root.after(80, self.run_oneclick)
             return
         if patch_name:  # smart_run_patch_fixed
             self.set_status("识别 patch 脚本：" + patch_name + "，执行中...")
@@ -499,7 +666,7 @@ class App:
             if source_tab != "files":
                 self.nb.select(self.tab_files)
             self._auto_copy_after_run = True
-            self.root.after(80, self.run_file_ops)
+            self.root.after(80, self.run_oneclick)
             return
         self.ops_text.delete("1.0", "end")
         self.ops_text.insert("1.0", content)
@@ -530,7 +697,9 @@ class App:
     def set_status(self, t):
         self.root.after(0, lambda: self.status_var.set(t))
 
-    def run_cmd(self, cmd, cwd=ROOT):
+    def run_cmd(self, cmd, cwd=None):
+        if cwd is None:
+            cwd = self.work_dir
         if cmd:
             cmd = list(cmd)
             cmd[0] = _resolve_exe(cmd[0])
@@ -554,7 +723,7 @@ class App:
     def refresh_patches(self):
         try:
             files = sorted(
-                (f for f in os.listdir(ROOT)
+                (f for f in os.listdir(self.work_dir)
                  if f.startswith("patch-") and (f.endswith(".py") or f.endswith(".cjs"))),
                 key=lambda f: (0 if f.endswith(".py") else 1, f),
             )
@@ -587,6 +756,13 @@ class App:
         cfg = _load_cfg()
         cfg[key] = value
         _save_cfg(cfg)
+
+    def _on_close(self):
+        try:
+            self._save_setting("window_geometry", self.root.geometry())
+        except Exception:
+            pass
+        self.root.destroy()
 
     def _on_auto_tc_toggle(self):
         self._save_setting("auto_typecheck", bool(self.auto_tc_var.get()))
@@ -695,7 +871,7 @@ class App:
         self.ops_text.insert("1.0", example)
 
     def load_devtasks(self):
-        p = os.path.join(ROOT, "devtasks.json")
+        p = os.path.join(self.work_dir, "devtasks.json")
         if not os.path.exists(p):
             return messagebox.showwarning("提示", "找不到 devtasks.json")
         try:
@@ -726,6 +902,8 @@ class App:
         ok, fail = self._exec_tasks(tasks)
         self.log(f"\n完成: {ok} 成功, {fail} 失败\n")
         self.set_status(f"{ok} 成功 / {fail} 失败")
+        if getattr(self, "copy_after_var", None) and self.copy_after_var.get():
+            self.root.after(0, self._copy_silent)
         if getattr(self, "_auto_copy_after_run", False):
             self._auto_copy_after_run = False
             self.root.after(80, self._copy_silent)
@@ -737,7 +915,7 @@ class App:
             try:
                 op = t.get("op")
                 path = t.get("path", "")
-                full = os.path.join(ROOT, path)
+                full = os.path.join(self.work_dir, path)
                 if op == "write":
                     d = os.path.dirname(full)
                     if d:
@@ -771,7 +949,7 @@ class App:
                     cmd = _rewrite_shell_cmd(cmd)
                     self.log(f"[{i}] shell  $ {cmd}")
                     sp = subprocess.run(
-                        cmd, cwd=ROOT, shell=True, capture_output=True,
+                        cmd, cwd=self.work_dir, shell=True, capture_output=True,
                         text=True, encoding="utf-8", errors="replace",
                     )
                     if sp.stdout:
@@ -792,7 +970,8 @@ class App:
                 fail += 1
         return ok, fail
 
-    # ================= 一键运行 =================
+        threading.Thread(target=self._bg_oneclick, daemon=True).start()
+
     def run_oneclick(self):
         threading.Thread(target=self._bg_oneclick, daemon=True).start()
 
@@ -816,43 +995,83 @@ class App:
         ok, fail = self._exec_tasks(tasks)
         self.log(f"\n文件操作: {ok} 成功 / {fail} 失败\n\n")
 
-        # 找最后一个 write 的文件名
-        last_written = None
+        # 识别可运行文件（扫描所有 write）
+        runnable = self._pick_runnable(tasks)
+
+        if not runnable:
+            self.log("⚠ 未识别出可运行的脚本（.cjs/.js/.py/.ps1/.sh），跳过执行\n")
+            if getattr(self, "copy_after_var", None) and self.copy_after_var.get():
+                self.root.after(0, self._copy_silent)
+            self.set_status("文件操作完成（无可运行脚本），已复制")
+            return
+
+        kind, name = runnable
+
+        if kind == "patch":
+            # 切到 patch tab + 刷新 + 选中
+            self.set_status("② 切换到 Patch tab: " + name)
+            def _switch():
+                self.nb.select(self.tab_patch)
+                self.refresh_patches()
+                values = self.patch_combo["values"] or ()
+                if name in values:
+                    self.patch_var.set(name)
+            self.root.after(0, _switch)
+            time.sleep(0.15)
+            self.set_status("③ 运行 patch: " + name)
+            if self.run_cmd(_patch_cmd(name)) != 0:
+                self.log("❌ " + name + " 运行失败\n")
+                if getattr(self, "copy_after_var", None) and self.copy_after_var.get():
+                    self.root.after(0, self._copy_silent)
+                self.set_status(name + " 运行失败")
+                return
+            self.log("✅ " + name + " 执行成功\n")
+        else:
+            # 其他可运行脚本
+            self.set_status("② 运行 " + kind + ": " + name)
+            cmd = self._runnable_cmd(kind, name)
+            if self.run_cmd(cmd) != 0:
+                self.log("❌ " + name + " 运行失败\n")
+                if getattr(self, "copy_after_var", None) and self.copy_after_var.get():
+                    self.root.after(0, self._copy_silent)
+                self.set_status(name + " 运行失败")
+                return
+            self.log("✅ " + name + " 执行成功\n")
+
+        if getattr(self, "copy_after_var", None) and self.copy_after_var.get():
+            self.root.after(0, self._copy_silent)
+
+    def _pick_runnable(self, tasks):
+        """扫描 tasks 里所有 write 的文件，返回最后一个可运行的 (kind, name)。"""
+        runnable = None
         for t in tasks:
-            if t.get("op") == "write" and t.get("path"):
-                last_written = t.get("path")
+            if t.get("op") != "write" or not t.get("path"):
+                continue
+            p = t.get("path")
+            name = os.path.basename(p)
+            ext = os.path.splitext(name)[1].lower()
+            if name.startswith("patch-") and ext == ".cjs":
+                runnable = ("patch", name)
+            elif ext == ".cjs" or ext == ".js":
+                runnable = ("node", name)
+            elif ext == ".py":
+                runnable = ("python", name)
+            elif ext == ".ps1":
+                runnable = ("powershell", name)
+            elif ext == ".sh":
+                runnable = ("bash", name)
+        return runnable
 
-        if not last_written:
-            self.log("⚠ 没有 write 操作，跳过 Patch\n")
-            self.root.after(0, self._copy_silent)
-            self.set_status("文件操作完成（无 Patch），输出已复制")
-            return
-
-        name = os.path.basename(last_written)
-
-        # ② 切到 Patch tab、刷新、选中
-        self.set_status("② 切换到 Patch tab...")
-        def _switch():
-            self.nb.select(self.tab_patch)
-            self.refresh_patches()
-            values = self.patch_combo["values"] or ()
-            if name in values:
-                self.patch_var.set(name)
-        self.root.after(0, _switch)
-        time.sleep(0.15)
-
-        # ③ 运行 Patch
-        self.set_status(f"③ 运行 {name} ...")
-        if self.run_cmd(_patch_cmd(name)) != 0:
-            self.log("❌ Patch 失败\n")
-            self.root.after(0, self._copy_silent)
-            self.set_status("Patch 失败，输出已复制")
-            return
-        self.log("✅ Patch 成功\n")
-
-        # ④ 复制输出
-        self.root.after(0, self._copy_silent)
-        self.set_status("🎉 一键运行完成，输出已复制到剪贴板")
+    def _runnable_cmd(self, kind, name):
+        if kind == "node":
+            return ["node", name]
+        if kind == "python":
+            return ["python", name]
+        if kind == "powershell":
+            return ["powershell", "-ExecutionPolicy", "Bypass", "-File", name]
+        if kind == "bash":
+            return ["bash", name]
+        return [name]
 
     def run_ops_patch_check(self):
         name = self.patch_var.get().strip()
