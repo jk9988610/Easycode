@@ -238,6 +238,35 @@ def apply_dark_theme(root):
     root.option_add("*TCombobox*Listbox.selectForeground", BG)
     root.option_add("*TCombobox*Listbox.borderWidth", "0")
 
+    style.configure("TSpinbox",
+                    fieldbackground=BG_ENTRY, background=BG_PANEL,
+                    foreground=FG, arrowcolor=FG_MUTED,
+                    bordercolor=LINE, lightcolor=LINE, darkcolor=LINE,
+                    insertcolor=FG)
+    style.map("TSpinbox",
+              fieldbackground=[("readonly", BG_ENTRY), ("focus", BG_ENTRY)],
+              foreground=[("readonly", FG)],
+              bordercolor=[("focus", ACCENT)],
+              arrowcolor=[("active", ACCENT)])
+
+    style.configure("TCheckbutton",
+                    background=BG, foreground=FG,
+                    indicatorcolor=BG_ENTRY, focuscolor=BG,
+                    bordercolor=LINE, lightcolor=BG, darkcolor=BG)
+    style.map("TCheckbutton",
+              background=[("active", BG), ("selected", BG)],
+              foreground=[("active", FG), ("selected", FG)],
+              indicatorcolor=[("selected", ACCENT), ("active", HOVER)])
+
+    style.configure("TRadiobutton",
+                    background=BG, foreground=FG,
+                    indicatorcolor=BG_ENTRY, focuscolor=BG,
+                    bordercolor=LINE)
+    style.map("TRadiobutton",
+              background=[("active", BG), ("selected", BG)],
+              foreground=[("active", FG), ("selected", FG)],
+              indicatorcolor=[("selected", ACCENT)])
+
     # 滚动条：透明灰
     # 滚动条：透明轨道，无边框，加宽
     for _orient in ("Vertical", "Horizontal"):
@@ -264,6 +293,98 @@ def apply_dark_theme(root):
 
 
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "devtool-config.json")
+
+HELP_TEXT = """DevTool 使用说明（通用项目开发辅助）
+
+本工具用于 AI 协作开发：AI 生成 patch 脚本 / 命令 -> 你粘贴 -> 工具执行 -> 输出结果回传 AI。
+
+═══ 四个 Tab ═══
+[文件操作]  粘 JSON，批量 write/append/delete/mkdir/shell
+[Patch & Commit]  选脚本、运行、验证、提交
+[设置]  工作目录、字体、Python、行为
+[帮助]  本页
+
+═══ 文件操作 JSON 格式 ═══
+[
+  {"op":"write",  "path":"相对路径", "content":"文件内容"},
+  {"op":"append", "path":"...", "content":"追加内容"},
+  {"op":"delete", "path":"..."},
+  {"op":"mkdir",  "path":"..."},
+  {"op":"shell",  "cmd":"任意命令"}
+]
+路径相对工作目录。write/append 自动创建父目录。
+
+═══ shell 自动识别 ═══
+不用记 cmd / PowerShell 的区别：
+  - node / python / npm / git / dir / echo / copy / del ... -> 走 cmd
+  - Add-Content / Remove-Item / Get-ChildItem / Set-Item / ... -> 自动走 PowerShell
+  - 含 -ErrorAction / -Force / $env: 等特征的 -> 走 PowerShell
+输出行前会标 [shell(cmd)] 或 [shell(psh)]。
+
+═══ 智能运行 ═══
+把 JSON 或纯 shell 命令粘到输入框（或复制到剪贴板），点 [智能运行]：
+  1. 读输入框 / 剪贴板（按"智能运行源"设置）
+  2. 自动识别三种输入:
+     - JSON 数组 -> 执行文件操作
+     - patch-xxx.* 文件名 -> 切到 Patch Tab 选中并运行
+     - 单行/多行 shell 命令 -> 直接跑
+  3. 若写了脚本文件 (.cjs/.js/.py/.ps1/.sh)，用对应解释器运行
+  4. 复制输出到剪贴板（若开启）
+识别为 patch- 开头时，自动切到 Patch Tab 并选中。
+
+═══ 设置项 ═══
+- 工作目录: 所有操作默认在此执行
+- 字体: 字体族 / 字号(文本区) / UI 字号(按钮标签)
+- Python 解释器: 留空=自动探测（项目 venv > PATH > sys.executable）
+- 脚本运行后自动执行验证: 跑完脚本是否跟一条验证命令
+- 每次执行后自动复制输出到剪贴板
+- 智能运行源: input_first / clipboard_first / ask
+所有设置改动即生效，无需点"应用"（字体有应用按钮可选）。
+
+═══ 自动识别验证命令 ═══
+根据工作目录里的项目文件自动选：
+  package.json        -> npm run typecheck
+  Cargo.toml          -> cargo check
+  go.mod              -> go build ./...
+  pytest.ini / pyproject.toml / setup.py  -> pytest -q
+  pom.xml             -> mvn -q compile
+  build.gradle        -> gradle build -q
+未识别时回退到 npm run typecheck。
+
+═══ Python 解释器探测顺序 ═══
+  1. 设置里的"Python 路径"（手动指定）
+  2. 项目 venv: <work_dir>/.venv 或 venv 或 env 下的 python
+  3. 环境变量 DEVTOOL_PYTHON
+  4. PATH 里的 python / python3 / py
+  5. 兜底: 运行 devtool 的 Python
+
+═══ 配置文件 ═══
+devtool-config.json（在 devtool.py 旁边）
+字段: work_dir / font_family / font_size / ui_font_size / python_path /
+      source_pref / auto_typecheck / copy_after_run / verify_cmd /
+      window_geometry / paned_pos / paned_total
+删除它 = 恢复所有默认值。
+
+═══ 输出颜色 ═══
+  $ 命令 / [shell(psh)]  蓝色
+  [exit 0] / 完成(0失败) / ✓ 操作成功  绿色
+  [exit 非0] / ❌ 失败 / 完成(有失败)  红色
+  ⚠ 警告                黄色
+  [源: ...]             青色
+
+═══ 界面 ═══
+- 主区和输出框之间有分隔条，可拖动调整高度（位置自动保存）
+- 输出框可拖大拖小，输出区上方有 [复制全部] [清空] 按钮
+- 窗口大小和位置下次启动自动恢复
+
+═══ 给 AI 协作的约定 ═══
+1. patch 脚本名 patch-*.{cjs,js,py,ps1,sh}
+2. 幂等: 锚点存在就跳过
+3. 处理 CRLF: split 时用 /\\r?\\n/
+4. 输出 UTF-8 无 BOM
+5. 完成后给用户明确的 commit message
+6. 改 devtool.py 前先备份 devtool_bak.py，改完跑 ast.parse 检查语法
+"""
 
 DEFAULT_WORK_DIR = ROOT
 
@@ -391,13 +512,17 @@ class App:
         self._main_paned.add(out, stretch="never", minsize=100)
 
 
-        self.output = scrolledtext.ScrolledText(
+        self.output = tk.Text(
             out, wrap="word", font=("Consolas", 10),
             bg=BG_ENTRY, fg=FG, insertbackground=FG,
             selectbackground=ACCENT, selectforeground=BG,
             relief="flat", borderwidth=0,
         )
         self.output.pack(fill="both", expand=True)
+        def _output_wheel(e):
+            self.output.yview_scroll(int(-e.delta / 120), "units")
+            return "break"
+        self.output.bind("<MouseWheel>", _output_wheel)
         self._setup_output_tags()
 
         bar = ttk.Frame(out)
@@ -615,22 +740,40 @@ class App:
     def _build_help_tab(self):
         f = ttk.Frame(self.tab_help)
         f.pack(fill="both", expand=True, padx=12, pady=12)
-        txt = scrolledtext.ScrolledText(
-            f, wrap="word", font=("Consolas", 10),
+
+        # 无滚动条的 Text（鼠标滚轮滚动）
+        txt = tk.Text(
+            f, wrap="char", font=("Consolas", 10),
             bg=BG_ENTRY, fg=FG, insertbackground=FG,
             selectbackground=ACCENT, selectforeground=BG,
             relief="flat", borderwidth=0,
         )
         txt.pack(fill="both", expand=True)
-        help_path = os.path.join(ROOT, "help.txt")
-        if os.path.exists(help_path):
-            with open(help_path, "r", encoding="utf-8") as fh:
-                txt.insert("1.0", fh.read())
-        else:
-            txt.insert("1.0", "（未找到 help.txt，请创建后再打开本页）")
+        txt.insert("1.0", HELP_TEXT)
         txt.configure(state="disabled")
 
-    # ================= 文件操作 Tab =================
+        def _on_wheel(e):
+            txt.yview_scroll(int(-e.delta / 120), "units")
+            return "break"
+        txt.bind("<MouseWheel>", _on_wheel)
+
+        copy_btn = ttk.Button(f, text="📋 复制全部帮助", command=self._copy_help_all)
+
+        def _show(e=None):
+            copy_btn.place(relx=1.0, rely=0.0, anchor="ne", x=-20, y=20)
+        def _hide(e=None):
+            copy_btn.place_forget()
+
+        txt.bind("<Enter>", _show)
+        txt.bind("<Leave>", _hide)
+        copy_btn.bind("<Enter>", _show)
+        copy_btn.bind("<Leave>", _hide)
+
+    def _copy_help_all(self):
+        self.root.clipboard_clear()
+        self.root.clipboard_append(HELP_TEXT)
+        self.set_status("已复制帮助内容到剪贴板")
+
     def _build_files_tab(self):
         info = ttk.Label(
             self.tab_files,
@@ -655,13 +798,17 @@ class App:
         ttk.Button(bottom, text="🚀 智能运行",
                    command=lambda: self.smart_run("files"), width=18).pack(side="left", padx=6)
 
-        self.ops_text = scrolledtext.ScrolledText(
+        self.ops_text = tk.Text(
             self.tab_files, height=16, wrap="word", font=("Consolas", 10),
             bg=BG_ENTRY, fg=FG, insertbackground=FG,
             selectbackground=ACCENT, selectforeground=BG,
             relief="flat", borderwidth=0,
         )
         self.ops_text.pack(fill="both", expand=True, padx=12, pady=6)
+        def _ops_wheel(e):
+            self.ops_text.yview_scroll(int(-e.delta / 120), "units")
+            return "break"
+        self.ops_text.bind("<MouseWheel>", _ops_wheel)
 
 
     # ================= 通用 =================
@@ -692,15 +839,27 @@ class App:
         l = line.rstrip()
         if not l:
             return "t_default"
+        # 完成行: N 成功, M 失败 -> 整行按是否有失败着色
+        import re as _re
+        m = _re.match(r"^完成:\s*(\d+)\s*成功,\s*(\d+)\s*失败", l)
+        if m:
+            return "t_ok" if m.group(2) == "0" else "t_err"
+        # 文件操作单行: [N] op  ✓ path -> 绿色
+        m2 = _re.match(r"^\[\d+\]\s+(write|append|delete|mkdir|shell)", l)
+        if m2 and ("\u2713" in l or "ok" in l.lower()):
+            return "t_ok"
+        m3 = _re.match(r"^\[\d+\].*\u274c", l)
+        if m3:
+            return "t_err"
         if l.startswith("$ "):
             return "t_cmd"
         if l.startswith("[exit 0]"):
             return "t_ok"
         if l.startswith("[exit "):
             return "t_err"
-        if "OK" in l or "\u2705" in l:
+        if "\u2705" in l:
             return "t_ok"
-        if "\u274c" in l or "\u5931\u8d25" in l or "\u9519\u8bef" in l:
+        if "\u274c" in l or l.startswith("[\u9519\u8bef]"):
             return "t_err"
         if "\u26a0" in l:
             return "t_warn"
