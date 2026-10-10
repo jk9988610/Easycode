@@ -75,15 +75,20 @@ def _resolve_exe(name):
 
 
 def _patch_cmd(name):
-    if name.endswith(".py"):
+    low = (name or "").lower()
+    if low.endswith(".py"):
         import sys as _sys
         return [_sys.executable, name]
-    if name.endswith(".cjs"):
+    if low.endswith(".cjs") or low.endswith(".js"):
         try:
             return [_find_node_exe(), name]
         except RuntimeError:
             return ["node", name]
-    return ["node", name]
+    if low.endswith(".ps1"):
+        return ["powershell", "-ExecutionPolicy", "Bypass", "-File", name]
+    if low.endswith(".sh"):
+        return ["bash", name]
+    return [name]
 
 def _rewrite_shell_cmd(cmd):
     if not cmd:
@@ -184,6 +189,8 @@ def _default_cfg():
     return {
         "work_dir": DEFAULT_WORK_DIR,
         "auto_typecheck": True,
+        "verify_cmd": "npm run typecheck",
+        "patch_pattern": "patch-*.cjs",
         "copy_after_run": True,
         "smart_recognize": True,
     }
@@ -199,6 +206,44 @@ def _load_cfg():
     except Exception:
         pass
     return cfg
+
+def _auto_verify_cmd(d):
+    if not d:
+        return ""
+    import os as _os
+    def has(name): return _os.path.exists(_os.path.join(d, name))
+    if has("package.json"):
+        return "npm run typecheck"
+    if has("Cargo.toml"):
+        return "cargo check"
+    if has("go.mod"):
+        return "go build ./..."
+    if has("pytest.ini") or has("pyproject.toml") or has("setup.py"):
+        return "pytest -q"
+    if has("requirements.txt"):
+        return "python -m py_compile"
+    if has("pom.xml"):
+        return "mvn -q compile"
+    if has("build.gradle") or has("build.gradle.kts"):
+        return "gradle build -q"
+    return ""
+
+
+def _verify_cmd_parts(cfg=None):
+    import shlex
+    if cfg is None:
+        cfg = _load_cfg()
+    cmd = (cfg.get("verify_cmd") or "").strip()
+    if not cmd:
+        cmd = _auto_verify_cmd(cfg.get("work_dir") or DEFAULT_WORK_DIR)
+    if not cmd:
+        cmd = "npm run typecheck"
+    try:
+        parts = shlex.split(cmd, posix=False)
+    except Exception:
+        parts = cmd.split()
+    return parts or ["npm", "run", "typecheck"]
+
 def _save_cfg(cfg):
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
@@ -312,14 +357,12 @@ class App:
         row1 = ttk.Frame(g1)
         row1.pack(fill="x")
         self.work_dir_var = tk.StringVar(value=self.work_dir)
-        ttk.Entry(row1, textvariable=self.work_dir_var).pack(side="left", fill="x", expand=True, padx=(0, 6))
-        # 改为在 Entry 上用 command bind
-        # (由后续 patch 追加)
-        _wde = row1.winfo_children()[-1] if False else None
+        _wde = ttk.Entry(row1, textvariable=self.work_dir_var)
+        _wde.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        _wde.bind("<Return>", lambda e: self._apply_work_dir())
+        _wde.bind("<FocusOut>", lambda e: self._apply_work_dir())
         ttk.Button(row1, text="浏览", command=self._browse_work_dir, width=10).pack(side="left")
-        ttk.Button(row1, text="应用", command=self._apply_work_dir, width=10).pack(side="left", padx=6)
-        ttk.Label(g1, text="所有文件操作、patch 运行、shell 命令默认在此目录下执行。",
-                  foreground=FG_MUTED).pack(anchor="w", pady=(6, 0))
+        ttk.Label(g1, text="所有文件操作、脚本运行、shell 命令默认在此目录下执行。", foreground=FG_MUTED).pack(anchor="w", pady=(6, 0))
 
         gFont = ttk.LabelFrame(f, text="字体", padding=10)
         gFont.pack(fill="x", pady=(0, 10))
@@ -327,27 +370,27 @@ class App:
         rowF.pack(fill="x")
         ttk.Label(rowF, text="字体族:").pack(side="left")
         self.font_family_var = tk.StringVar(value=self._cfg.get("font_family", "Consolas"))
-        ttk.Entry(rowF, textvariable=self.font_family_var, width=22).pack(side="left", padx=(6, 16))
+        _fe = ttk.Entry(rowF, textvariable=self.font_family_var, width=22)
+        _fe.pack(side="left", padx=(6, 16))
         ttk.Label(rowF, text="字号:").pack(side="left")
         self.font_size_var = tk.StringVar(value=str(self._cfg.get("font_size", 10)))
-        ttk.Spinbox(rowF, from_=8, to=32, textvariable=self.font_size_var, width=6).pack(side="left", padx=6)
-        ttk.Button(rowF, text="应用字体", command=self._apply_font).pack(side="left", padx=6)
-        ttk.Label(gFont, text="应用到所有输出区、JSON 输入区（下次启动也生效）。", foreground=FG_MUTED).pack(anchor="w", pady=(6, 0))
+        _fse = ttk.Spinbox(rowF, from_=8, to=32, textvariable=self.font_size_var, width=6)
+        _fse.pack(side="left", padx=6)
+        _fe.bind("<Return>", lambda e: self._apply_font())
+        _fe.bind("<FocusOut>", lambda e: self._apply_font())
+        _fse.bind("<Return>", lambda e: self._apply_font())
+        _fse.bind("<FocusOut>", lambda e: self._apply_font())
+        ttk.Label(gFont, text="应用到所有输出区、JSON 输入区。", foreground=FG_MUTED).pack(anchor="w", pady=(6, 0))
 
         g2 = ttk.LabelFrame(f, text="行为", padding=10)
         g2.pack(fill="x", pady=(0, 10))
         self.auto_tc_var = tk.BooleanVar(value=self._cfg.get("auto_typecheck", True))
-        ttk.Checkbutton(g2, text="patch 后自动运行 typecheck", variable=self.auto_tc_var,
+        ttk.Checkbutton(g2, text="脚本运行后自动执行验证", variable=self.auto_tc_var,
                         command=lambda: self._save_setting("auto_typecheck", bool(self.auto_tc_var.get()))
                         ).pack(anchor="w", pady=2)
         self.copy_after_var = tk.BooleanVar(value=self._cfg.get("copy_after_run", True))
         ttk.Checkbutton(g2, text="每次执行后自动复制输出到剪贴板", variable=self.copy_after_var,
                         command=lambda: self._save_setting("copy_after_run", bool(self.copy_after_var.get()))
-                        ).pack(anchor="w", pady=2)
-        self.smart_recog_var = tk.BooleanVar(value=self._cfg.get("smart_recognize", True))
-        ttk.Checkbutton(g2, text="智能运行：自动识别并运行刚写入的脚本 (.cjs/.js/.py/.ps1/.sh)",
-                        variable=self.smart_recog_var,
-                        command=lambda: self._save_setting("smart_recognize", bool(self.smart_recog_var.get()))
                         ).pack(anchor="w", pady=2)
 
         rowSrc = ttk.Frame(g2)
@@ -358,11 +401,11 @@ class App:
         self.source_pref_combo["values"] = ("input_first", "clipboard_first", "ask")
         self.source_pref_combo.pack(side="left", padx=6)
         self.source_pref_combo.bind("<<ComboboxSelected>>", lambda e: self._apply_source_pref())
+        ttk.Label(g2, text="input_first=输入框优先 / clipboard_first=剪贴板优先 / ask=每次询问", foreground=FG_MUTED).pack(anchor="w", pady=(2, 0))
 
-        ttk.Label(g2, text="input_first=输入框优先 / clipboard_first=剪贴板优先 / ask=每次询问",
-                  foreground=FG_MUTED).pack(anchor="w", pady=(2, 0))
-
-        ttk.Label(f, text="配置文件: " + CONFIG_FILE, foreground=FG_MUTED).pack(anchor="w", pady=(10, 0))
+        _auto = _auto_verify_cmd(self.work_dir)
+        ttk.Label(f, text="自动识别的验证命令: " + (_auto or "(未识别，将回退到 npm run typecheck)"), foreground=FG_MUTED).pack(anchor="w", pady=(6, 0))
+        ttk.Label(f, text="配置文件: " + CONFIG_FILE, foreground=FG_MUTED).pack(anchor="w", pady=(2, 0))
 
     def _browse_work_dir(self):
         from tkinter import filedialog
@@ -722,10 +765,10 @@ class App:
     # ================= Patch 相关 =================
     def refresh_patches(self):
         try:
+            exts = (".cjs", ".js", ".py", ".ps1", ".sh")
             files = sorted(
-                (f for f in os.listdir(self.work_dir)
-                 if f.startswith("patch-") and (f.endswith(".py") or f.endswith(".cjs"))),
-                key=lambda f: (0 if f.endswith(".py") else 1, f),
+                (f for f in os.listdir(self.work_dir) if f.lower().endswith(exts)),
+                key=lambda f: f,
             )
         except OSError:
             files = []
@@ -773,7 +816,7 @@ class App:
     def _bg_typecheck(self):
         self.clear_log()
         self.set_status("typecheck...")
-        c = self.run_cmd(["npm", "run", "typecheck"])
+        c = self.run_cmd(_verify_cmd_parts(self._cfg))
         self.log("✅ Typecheck 通过\n" if c == 0 else "❌ Typecheck 失败\n")
         self.set_status("typecheck 通过" if c == 0 else "typecheck 失败")
 
@@ -818,7 +861,7 @@ class App:
             return
         self.log("✅ Patch 成功\n\n")
         self.set_status("Typecheck 中...")
-        if self.run_cmd(["npm", "run", "typecheck"]) != 0:
+        if self.run_cmd(_verify_cmd_parts(self._cfg)) != 0:
             self.log("❌ Typecheck 失败\n")
             self.set_status("Typecheck 失败")
             return
@@ -843,7 +886,7 @@ class App:
             return
         self.log("✅ Patch 成功\n\n")
         self.set_status("② Typecheck...")
-        if self.run_cmd(["npm", "run", "typecheck"]) != 0:
+        if self.run_cmd(_verify_cmd_parts(self._cfg)) != 0:
             self.log("❌ Typecheck 失败\n")
             return
         self.log("✅ Typecheck 通过\n\n")
@@ -1050,9 +1093,9 @@ class App:
             p = t.get("path")
             name = os.path.basename(p)
             ext = os.path.splitext(name)[1].lower()
-            if name.startswith("patch-") and ext == ".cjs":
+            if name.startswith("patch-") and ext in (".cjs", ".js", ".py", ".ps1", ".sh"):
                 runnable = ("patch", name)
-            elif ext == ".cjs" or ext == ".js":
+            elif ext in (".cjs", ".js"):
                 runnable = ("node", name)
             elif ext == ".py":
                 runnable = ("python", name)
@@ -1097,7 +1140,7 @@ class App:
             return
         self.log("✅ Patch 成功\n\n")
         self.set_status("③ Typecheck...")
-        if self.run_cmd(["npm", "run", "typecheck"]) != 0:
+        if self.run_cmd(_verify_cmd_parts(self._cfg)) != 0:
             self.log("❌ Typecheck 失败\n")
             return
         self.log("✅ Typecheck 通过\n\n")
