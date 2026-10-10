@@ -30,6 +30,9 @@ def _find_python(work_dir=None, override=None):
         if p:
             return p
     import sys as _sys
+    if getattr(sys, "frozen", False):
+        # 打包后没有 python 解释器，让系统 PATH 里的 python 顶上
+        return "python"
     return _sys.executable
 
 
@@ -167,7 +170,11 @@ def _rewrite_shell_cmd(cmd):
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, "frozen", False):
+    APP_DIR = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    APP_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT = APP_DIR
 
 # ================= 配色 =================
 BG        = "#000000"
@@ -292,7 +299,7 @@ def apply_dark_theme(root):
                   arrowcolor=[("active", "#999999")])
 
 
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "devtool-config.json")
+CONFIG_FILE = os.path.join(APP_DIR, "devtool-config.json")
 
 HELP_TEXT = """DevTool 使用说明（通用项目开发辅助）
 
@@ -588,8 +595,45 @@ class App:
 
     # ================= 设置 Tab =================
     def _build_settings_tab(self):
-        f = ttk.Frame(self.tab_settings)
-        f.pack(fill="both", expand=True, padx=12, pady=12)
+        outer = ttk.Frame(self.tab_settings)
+        outer.pack(fill="both", expand=True)
+        canvas = tk.Canvas(outer, bg=BG, highlightthickness=0, bd=0)
+        canvas.pack(side="left", fill="both", expand=True)
+        f = ttk.Frame(canvas)
+        _win = canvas.create_window((0, 0), window=f, anchor="nw")
+
+        _state = {"last_w": 0, "busy": False}
+        def _sync(e=None):
+            if _state["busy"]:
+                return
+            _state["busy"] = True
+            try:
+                w = canvas.winfo_width()
+                if w > 1 and _state["last_w"] != w:
+                    _state["last_w"] = w
+                    canvas.itemconfigure(_win, width=w)
+                bbox = canvas.bbox("all")
+                if bbox:
+                    canvas.configure(scrollregion=bbox)
+            finally:
+                _state["busy"] = False
+        canvas.bind("<Configure>", _sync)
+        f.bind("<Configure>", _sync)
+
+        def _wheel(e):
+            try:
+                canvas.yview_scroll(int(-e.delta / 120), "units")
+            except Exception:
+                pass
+            return "break"
+
+        def _bind_wheel(widget):
+            try:
+                widget.bind("<MouseWheel>", _wheel)
+            except Exception:
+                pass
+            for child in widget.winfo_children():
+                _bind_wheel(child)
 
         g1 = ttk.LabelFrame(f, text="工作目录", padding=10)
         g1.pack(fill="x", pady=(0, 10))
@@ -664,6 +708,10 @@ class App:
         _auto = _auto_verify_cmd(self.work_dir)
         ttk.Label(f, text="自动识别的验证命令: " + (_auto or "(未识别，将回退到 npm run typecheck)"), foreground=FG_MUTED).pack(anchor="w", pady=(6, 0))
         ttk.Label(f, text="配置文件: " + CONFIG_FILE, foreground=FG_MUTED).pack(anchor="w", pady=(2, 0))
+
+        # 递归绑定滚轮
+        _bind_wheel(f)
+
 
     def _browse_work_dir(self):
         from tkinter import filedialog
