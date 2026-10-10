@@ -1,63 +1,64 @@
-EasyCode DevTool — 使用指南（给 AI 助手看）
+DevTool 使用说明（通用项目开发辅助）
 
-═══ 工具用途 ═══
-让 AI 与用户协作完成"改代码 → 跑 patch → 提交"闭环，
-全程无需手动开 VS Code 编辑文件或敲 PowerShell 命令。
+本工具用于 AI 协作开发：AI 生成 patch 脚本 / 命令 -> 你粘贴 -> 工具执行 -> 输出结果回传 AI。
 
-═══ Tab 布局 ═══
-① 文件操作（左）  —— 粘贴 JSON，批量写入/追加/删除/创建文件
-② Patch & Commit（中）—— 选 patch 脚本、跑 patch、typecheck、git 提交
-③ 帮助（右）      —— 本说明（内容来自根目录 help.txt）
-
-═══ 典型工作流 ═══
-1. AI 生成一段 JSON（内含 patch-xxx.cjs 的完整内容）
-2. 用户在「文件操作」tab 粘贴 JSON
-3. 用户点「⚡ 一键运行」
-4. 工具自动：写文件 → 切到 Patch tab → 选中刚写的文件 → 跑 patch → 复制输出到剪贴板
-5. 用户 Ctrl+V 把输出粘回给 AI
+═══ 四个 Tab ═══
+[文件操作]  粘 JSON，批量 write/append/delete/mkdir/shell
+[Patch & Commit]  选脚本、运行、验证、提交
+[设置]  工作目录、字体、行为
+[帮助]  本页
 
 ═══ 文件操作 JSON 格式 ═══
 [
-  {"op": "write",  "path": "patch-xxx.cjs", "content": "..."},
-  {"op": "append", "path": "...",           "content": "..."},
-  {"op": "delete", "path": "..."},
-  {"op": "mkdir",  "path": "..."}
+  {"op":"write",  "path":"相对路径", "content":"文件内容"},
+  {"op":"append", "path":"...", "content":"追加内容"},
+  {"op":"delete", "path":"..."},
+  {"op":"mkdir",  "path":"..."},
+  {"op":"shell",  "cmd":"任意命令"}
 ]
-路径相对项目根。write / append 自动创建父目录。
+路径相对工作目录。write/append 自动创建父目录。
 
-═══ 关键约定 ═══
-- patch 脚本名必须以 patch- 开头、.cjs 结尾，才会出现在下拉里
-- 「⚡ 一键运行」只跑 patch，不跑 typecheck
-- 需要 typecheck 用「▶ 执行 + Patch + Typecheck」按钮
-- 输出是 UTF-8，粘贴回 AI 不会乱码
+═══ 智能运行 ═══
+把 JSON 粘到输入框（或复制到剪贴板），点 [智能运行]：
+  1. 读输入框 / 剪贴板（按"智能运行源"设置）
+  2. 执行文件操作
+  3. 自动识别刚写的脚本（.cjs/.js/.py/.ps1/.sh）
+  4. 用对应解释器运行
+  5. 复制输出到剪贴板
+若文件名以 patch- 开头，自动切到 Patch Tab 并选中。
 
-═══ 为什么要用这套流程 ═══
-- 避免 PowerShell 的多层转义和编码坑（UTF-8 常被写坏）
-- Python 直接调 node / npm / git，稳定可靠
-- 一次点击完成"写文件 + 跑脚本 + 复制输出"
+═══ 设置项 ═══
+- 工作目录: 所有操作默认在此执行
+- 字体: 字体族 + 字号
+- 脚本运行后自动执行验证: 跑完脚本是否跟一条验证命令
+- 每次执行后自动复制输出到剪贴板
+- 智能运行源: input_first / clipboard_first / ask
+所有设置改动即生效，无需点"应用"。
 
-═══ 给 AI 的历史踩坑提醒 ═══
-- 源文件多为 CRLF：写 patch 时按行处理，避免用反斜杠 n 匹配多行
-- 不要用 PowerShell Set-Content 改源码（会坏 UTF-8）
-- patch 脚本要幂等：先检测锚点是否存在，已存在就跳过
-- patch 脚本要能在 devtool 里直接运行（用 CommonJS require）
-- 中文字符保存为 UTF-8，不要 BOM
+═══ 自动识别验证命令 ═══
+根据工作目录里的项目文件自动选：
+  package.json        -> npm run typecheck
+  Cargo.toml          -> cargo check
+  go.mod              -> go build ./...
+  pytest.ini / pyproject.toml / setup.py  -> pytest -q
+  pom.xml             -> mvn -q compile
+  build.gradle        -> gradle build -q
+未识别时回退到 npm run typecheck。
 
-═══ 智能运行（🚀） ═══
-位置：文件操作 tab 和 Patch tab 各有一个「🚀 智能运行」按钮。
+═══ 配置文件 ═══
+devtool-config.json（在 devtool 旁边）
+记录：work_dir / font_family / font_size / source_pref / window_geometry 等。
+删除它 = 恢复所有默认值。
 
-行为：
-1. 从剪贴板读取内容
-2. 自动分析内容类型：
-   - ```json ... ``` 代码块 → 提取其中的 JSON 数组
-   - 裸 JSON 数组（[ 开头）→ 直接解析
-   - 包含 patch-xxx.cjs 文件名 → 视为 patch 指令
-3. 自动执行：
-   - 文件操作 JSON → 填入输入框并运行文件操作
-   - patch 指令 → 切到 Patch tab 并运行对应脚本
-4. 无法识别 → 原样填入输入框，不自动执行
+═══ 输出颜色 ═══
+  $ 命令    蓝色
+  [exit 0]  绿色   [exit 非0]  红色
+  ✅ OK     绿色   ❌ 失败      红色
+  ⚠ 警告    黄色   [源: ...]   蓝色
 
-指令范式（AI 回复给用户时建议遵循）：
-- 文件操作：一段包含 ```json [...] ``` 的回复
-- Patch 运行：提到 patch-xxx.cjs 文件名即可
-- 支持整段复制 AI 的回复（含说明文字），智能运行会自动提取代码块
+═══ 给 AI 协作的约定 ═══
+1. patch 脚本名 patch-*.{cjs,js,py,ps1,sh}
+2. 幂等: 锚点存在就跳过
+3. 处理 CRLF: split 时用 /\r?\n/
+4. 输出 UTF-8 无 BOM
+5. 完成后给用户明确的 commit message

@@ -113,17 +113,19 @@ from tkinter import ttk, scrolledtext, messagebox
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
 # ================= 配色 =================
-BG        = "#0d1117"
-BG_PANEL  = "#161b22"
-BG_ENTRY  = "#0a0d12"
+BG        = "#000000"
+BG_PANEL  = "#0a0a0a"
+BG_ENTRY  = "#030303"
 FG        = "#e6edf2"
-FG_MUTED  = "#7d8590"
-ACCENT    = "#58a6ff"
+FG_MUTED  = "#8b949e"
+ACCENT    = "#4ea8ff"
 ACCENT_H  = "#79b8ff"
-LINE      = "#30363d"
-HOVER     = "#1f2429"
+LINE      = "#2a2a2a"
+HOVER     = "#141414"
 DANGER    = "#f85149"
 OK        = "#3fb950"
+WARN      = "#d29922"
+
 
 
 def apply_dark_theme(root):
@@ -178,6 +180,18 @@ def apply_dark_theme(root):
     root.option_add("*TCombobox*Listbox.selectBackground", ACCENT)
     root.option_add("*TCombobox*Listbox.selectForeground", BG)
     root.option_add("*TCombobox*Listbox.borderWidth", "0")
+
+    # 滚动条：透明灰
+    for _orient in ("Vertical", "Horizontal"):
+        _name = _orient + ".TScrollbar"
+        style.configure(_name,
+                        background="#2a2a2a", troughcolor=BG,
+                        bordercolor=BG, arrowcolor="#666666",
+                        lightcolor="#2a2a2a", darkcolor="#2a2a2a",
+                        relief="flat", borderwidth=0)
+        style.map(_name,
+                  background=[("active", "#3a3a3a"), ("pressed", "#4a4a4a")],
+                  arrowcolor=[("active", "#999999")])
 
 
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "devtool-config.json")
@@ -254,7 +268,7 @@ def _save_cfg(cfg):
 class App:
     def __init__(self, root):
         self.root = root
-        root.title("EasyCode DevTool")
+        root.title("DevTool")
         root.geometry("1060x820")
         root.minsize(880, 640)
 
@@ -274,12 +288,20 @@ class App:
         apply_dark_theme(root)
 
         top = ttk.Frame(root)
-        top.pack(fill="x", padx=12, pady=(10, 0))
+        top.grid(row=0, column=0, sticky="ew", padx=12, pady=(10, 0))
         self.status_var = tk.StringVar(value="就绪")
         ttk.Label(top, textvariable=self.status_var, foreground=FG_MUTED).pack(side="left")
 
         self.nb = ttk.Notebook(root)
-        self.nb.pack(fill="both", expand=True, padx=12, pady=(6, 4))
+        # 上下可拖拽面板
+        self._main_paned = tk.PanedWindow(root, orient="vertical",
+                                    sashwidth=6, sashrelief="flat",
+                                    bg="#1c1c1c", bd=0)
+        self._main_paned.grid(row=1, column=0, sticky="nsew", padx=12, pady=(6, 4))
+        root.grid_rowconfigure(1, weight=1)
+        root.grid_columnconfigure(0, weight=1)
+        self.nb = ttk.Notebook(self._main_paned)
+        self._main_paned.add(self.nb, stretch="never", minsize=200)
 
         self.tab_files = ttk.Frame(self.nb)
         self.tab_patch = ttk.Frame(self.nb)
@@ -296,8 +318,9 @@ class App:
         self._build_settings_tab()
         self._build_help_tab()
 
-        out = ttk.LabelFrame(root, text="输出", padding=8)
-        out.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        out = ttk.LabelFrame(self._main_paned, text="输出", padding=8)
+        self._main_paned.add(out, stretch="never", minsize=100)
+
 
         self.output = scrolledtext.ScrolledText(
             out, wrap="word", font=("Consolas", 10),
@@ -306,15 +329,19 @@ class App:
             relief="flat", borderwidth=0,
         )
         self.output.pack(fill="both", expand=True)
+        self._setup_output_tags()
 
         bar = ttk.Frame(out)
         bar.pack(fill="x", pady=(8, 0))
         ttk.Button(bar, text="📋 复制全部输出", command=self.copy_all).pack(side="right")
         ttk.Button(bar, text="🗑 清空", command=self.clear_log).pack(side="right", padx=6)
 
-        self._apply_font_recursive(self.root, self._cfg.get("font_family", "Consolas"), int(self._cfg.get("font_size", 10)))
+        self._apply_font()
 
-        self.log("欢迎使用 EasyCode DevTool（深色主题）\n")
+
+        self._restore_paned()
+
+        self.log("DevTool 就绪\n")
 
     # ================= Patch Tab =================
     def _build_patch_tab(self):
@@ -376,10 +403,17 @@ class App:
         self.font_size_var = tk.StringVar(value=str(self._cfg.get("font_size", 10)))
         _fse = ttk.Spinbox(rowF, from_=8, to=32, textvariable=self.font_size_var, width=6)
         _fse.pack(side="left", padx=6)
+        ttk.Label(rowF, text="UI 字号:").pack(side="left")
+        self.ui_font_size_var = tk.StringVar(value=str(self._cfg.get("ui_font_size", 9)))
+        _fue = ttk.Spinbox(rowF, from_=7, to=20, textvariable=self.ui_font_size_var, width=5)
+        _fue.pack(side="left", padx=6)
+        _fue.bind("<Return>", lambda e: self._apply_font())
+        _fue.bind("<FocusOut>", lambda e: self._apply_font())
         _fe.bind("<Return>", lambda e: self._apply_font())
         _fe.bind("<FocusOut>", lambda e: self._apply_font())
         _fse.bind("<Return>", lambda e: self._apply_font())
         _fse.bind("<FocusOut>", lambda e: self._apply_font())
+        ttk.Button(rowF, text="应用", command=self._apply_font, width=8).pack(side="left", padx=(16, 0))
         ttk.Label(gFont, text="应用到所有输出区、JSON 输入区。", foreground=FG_MUTED).pack(anchor="w", pady=(6, 0))
 
         g2 = ttk.LabelFrame(f, text="行为", padding=10)
@@ -434,13 +468,44 @@ class App:
             size = 10
         if size < 8 or size > 32:
             size = 10
+        try:
+            ui_size = int(self.ui_font_size_var.get())
+        except Exception:
+            ui_size = 9
+        if ui_size < 7 or ui_size > 20:
+            ui_size = 9
+
         self._cfg["font_family"] = fam
         self._cfg["font_size"] = size
+        self._cfg["ui_font_size"] = ui_size
         self._save_setting("font_family", fam)
         self._save_setting("font_size", size)
+        self._save_setting("ui_font_size", ui_size)
+
+        # ttk 控件：按钮/标签/输入框/Notebook 页签 全部用 UI 字号
+        style = ttk.Style()
+        for name in ("TButton", "TLabel", "TEntry", "TCombobox", "TSpinbox",
+                     "TCheckbutton", "TRadiobutton", "TNotebook.Tab",
+                     "TLabelframe.Label", "TFrame"):
+            try:
+                style.configure(name, font=(fam, ui_size))
+            except Exception:
+                pass
+
+        # Tk 默认字体
+        import tkinter.font as _tkfont
+        for fname in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont"):
+            try:
+                f = _tkfont.nametofont(fname)
+                f.configure(family=fam, size=ui_size)
+            except Exception:
+                pass
+
+        # 文本区（输出/输入）用 size
         self._apply_font_recursive(self.root, fam, size)
-        self.set_status("字体已更新: " + fam + " " + str(size))
-        self.log("字体已更新: " + fam + " " + str(size) + "\n")
+
+        self.set_status("字体: " + fam + " UI=" + str(ui_size) + " 文本=" + str(size))
+        self.log("字体: " + fam + " UI=" + str(ui_size) + " 文本=" + str(size) + "\n")
 
     def _apply_source_pref(self):
         v = self.source_pref_var.get()
@@ -518,19 +583,48 @@ class App:
     # ================= 通用 =================
     def log(self, text):
         def _do():
-            out = text
-            # filter CRLF warnings
-            if "warning: LF will be replaced" in out or "warning: in the working copy" in out:
-                _lines = out.split(chr(10))
-                _lines = [l for l in _lines if "warning: LF will be replaced" not in l and "warning: in the working copy" not in l]
-                out = chr(10).join(_lines)
-                if not out.strip():
-                    return
-            self.output.insert("end", out)
-            if not out.endswith("\n"):
-                self.output.insert("end", "\n")
+            txt = text if text.endswith("\n") else (text + "\n")
+            parts = txt.split("\n")
+            for raw in parts[:-1]:
+                tag = self._line_tag(raw)
+                self.output.insert("end", raw + "\n", tag)
             self.output.see("end")
         self.root.after(0, _do)
+
+    def _setup_output_tags(self):
+        cfg = {
+            "t_default": FG,
+            "t_muted":   FG_MUTED,
+            "t_cmd":     "#79b8ff",
+            "t_ok":      OK,
+            "t_err":     DANGER,
+            "t_warn":    WARN,
+            "t_accent":  ACCENT,
+        }
+        for name, fg in cfg.items():
+            self.output.tag_configure(name, foreground=fg)
+
+    def _line_tag(self, line):
+        l = line.rstrip()
+        if not l:
+            return "t_default"
+        if l.startswith("$ "):
+            return "t_cmd"
+        if l.startswith("[exit 0]"):
+            return "t_ok"
+        if l.startswith("[exit "):
+            return "t_err"
+        if "OK" in l or "\u2705" in l:
+            return "t_ok"
+        if "\u274c" in l or "\u5931\u8d25" in l or "\u9519\u8bef" in l:
+            return "t_err"
+        if "\u26a0" in l:
+            return "t_warn"
+        if l.startswith("[\u6e90:"):
+            return "t_accent"
+        if l.startswith("["):
+            return "t_muted"
+        return "t_default"
 
     def clear_log(self):
         self.output.delete("1.0", "end")
@@ -800,11 +894,64 @@ class App:
         cfg[key] = value
         _save_cfg(cfg)
 
+    def _save_paned(self):
+        try:
+            if hasattr(self, "_main_paned"):
+                pos = self._main_paned.sash_coord(0)[1]
+                h = self._main_paned.winfo_height()
+                if pos > 0 and h > 0 and pos < h:
+                    self._cfg["paned_pos"] = pos
+                    self._cfg["paned_total"] = h
+                    self._save_setting("paned_pos", pos)
+                    self._save_setting("paned_total", h)
+                    print("[paned] saved pos=" + str(pos) + " total=" + str(h))
+        except Exception as e:
+            print("[_save_paned]", e)
+
+    def _restore_paned(self):
+        pos = self._cfg.get("paned_pos")
+        total = self._cfg.get("paned_total")
+        print("[paned restore] cfg pos=" + str(pos) + " total=" + str(total))
+        if not pos:
+            return
+        def _try(attempt=0):
+            try:
+                mapped = self._main_paned.winfo_ismapped()
+                h_now = self._main_paned.winfo_height()
+                if not mapped or h_now < 50:
+                    if attempt < 20:
+                        self.root.after(100, lambda: _try(attempt + 1))
+                    return
+                new_pos = int(pos)
+                if total and total > 0:
+                    new_pos = int(pos / total * h_now)
+                if 80 <= new_pos <= h_now - 100:
+                    self._main_paned.sash_place(0, 0, new_pos)
+                    print("[paned] restored to " + str(new_pos))
+                else:
+                    print("[paned] skip new_pos=" + str(new_pos) + " range 80.." + str(h_now - 100))
+            except Exception as e:
+                print("[paned try err] " + str(e))
+        self.root.after(400, lambda: _try(0))
+
+    def _apply_paned_pos(self, pos):
+        try:
+            total = self._main_paned.winfo_height()
+            if total <= 0 or pos < 80 or pos > total - 100:
+                return
+            self._main_paned.sashpos(0, pos)
+        except Exception:
+            pass
+
     def _on_close(self):
         try:
             self._save_setting("window_geometry", self.root.geometry())
         except Exception:
             pass
+        try:
+            self._save_paned()
+        except Exception as e:
+            print("[_on_close save_paned]", e)
         self.root.destroy()
 
     def _on_auto_tc_toggle(self):
