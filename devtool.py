@@ -170,10 +170,19 @@ def _rewrite_shell_cmd(cmd):
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
 
-if getattr(sys, "frozen", False):
-    APP_DIR = os.path.dirname(os.path.abspath(sys.executable))
-else:
-    APP_DIR = os.path.dirname(os.path.abspath(__file__))
+def _resolve_app_dir():
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        parent = os.path.dirname(exe_dir)
+        # exe 在 dist/ 下, 且父目录里有 devtool.py, 则用父目录
+        if (os.path.basename(exe_dir).lower() == "dist"
+                and os.path.exists(os.path.join(parent, "devtool.py"))):
+            return parent
+        return exe_dir
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+APP_DIR = _resolve_app_dir()
 ROOT = APP_DIR
 
 # ================= 配色 =================
