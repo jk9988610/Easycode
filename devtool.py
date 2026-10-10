@@ -11,6 +11,28 @@ import re
 import subprocess
 
 
+def _find_python(work_dir=None, override=None):
+    import os as _os
+    import shutil as _sh
+    if override and _os.path.exists(override):
+        return override
+    if work_dir:
+        for v in (".venv", "venv", "env"):
+            for sub in ("Scripts/python.exe", "Scripts/python", "bin/python", "bin/python3"):
+                p = _os.path.join(work_dir, v, sub)
+                if _os.path.exists(p):
+                    return p
+    env = _os.environ.get("DEVTOOL_PYTHON")
+    if env and _os.path.exists(env):
+        return env
+    for name in ("python", "python3", "py"):
+        p = _sh.which(name)
+        if p:
+            return p
+    import sys as _sys
+    return _sys.executable
+
+
 def _find_node_exe():
     import os as _os
     import shutil as _sh
@@ -74,11 +96,10 @@ def _resolve_exe(name):
     return name
 
 
-def _patch_cmd(name):
+def _patch_cmd(name, work_dir=None, py_override=None):
     low = (name or "").lower()
     if low.endswith(".py"):
-        import sys as _sys
-        return [_sys.executable, name]
+        return [_find_python(work_dir, py_override), name]
     if low.endswith(".cjs") or low.endswith(".js"):
         try:
             return [_find_node_exe(), name]
@@ -89,6 +110,42 @@ def _patch_cmd(name):
     if low.endswith(".sh"):
         return ["bash", name]
     return [name]
+
+def _looks_like_powershell(cmd):
+    if not cmd:
+        return False
+    import re as _re
+    stripped = cmd.strip()
+    first = stripped.split(None, 1)[0].lower()
+    # 明确的命令行工具：走 cmd
+    if first in (
+        "node", "python", "python3", "py", "npm", "npx", "git",
+        "dir", "type", "echo", "del", "copy", "move", "mkdir", "rmdir",
+        "cd", "start", "call", "set",
+    ):
+        return False
+    # PowerShell cmdlet 命名模式: Verb-Noun
+    verbs = {
+        "add", "clear", "close", "copy", "enter", "exit", "find", "format",
+        "get", "hide", "join", "lock", "move", "new", "open", "optimize",
+        "pop", "push", "redo", "remove", "rename", "reset", "resize",
+        "resolve", "restart", "resume", "save", "search", "select", "set",
+        "show", "skip", "split", "start", "step", "stop", "submit",
+        "suspend", "switch", "tee", "test", "trace", "unblock", "undo",
+        "uninstall", "unlock", "unregister", "update", "use", "wait",
+        "watch", "write", "out", "invoke", "measure", "compare",
+        "convertto", "convertfrom", "export", "import", "read", "receive",
+        "send", "sort", "group", "merge", "register", "debug", "disable",
+        "enable", "grant", "revoke", "checkpoint", "complete", "compress",
+        "expand", "install", "publish", "restore", "protect", "backup",
+        "block", "confirm", "deny", "approve", "assert",
+    }
+    m = _re.match(r"^([a-z]+)-", first)
+    if m and m.group(1) in verbs:
+        return True
+    # 其他 PowerShell 特征
+    hints = ("-ErrorAction", "-Force", "-Recurse", "$env:")
+    return any(h in cmd for h in hints)
 
 def _rewrite_shell_cmd(cmd):
     if not cmd:
@@ -145,8 +202,8 @@ def apply_dark_theme(root):
               foreground=[("selected", ACCENT), ("active", FG)])
 
     style.configure("TLabelframe", background=BG, foreground=FG_MUTED,
-                    bordercolor=LINE, lightcolor=LINE, darkcolor=LINE)
-    style.configure("TLabelframe.Label", background=BG, foreground=FG_MUTED)
+                    bordercolor="#141414", lightcolor="#141414", darkcolor="#141414")
+    style.configure("TLabelframe.Label", background=BG, foreground="#4ea8ff")
 
     style.configure("TFrame", background=BG)
     style.configure("TLabel", background=BG, foreground=FG)
@@ -182,6 +239,18 @@ def apply_dark_theme(root):
     root.option_add("*TCombobox*Listbox.borderWidth", "0")
 
     # 滚动条：透明灰
+    # 滚动条：透明轨道，无边框，加宽
+    for _orient in ("Vertical", "Horizontal"):
+        _name = _orient + ".TScrollbar"
+        style.configure(_name,
+                        background="#3a3a3a", troughcolor=BG,
+                        bordercolor=BG, arrowcolor=BG,
+                        lightcolor="#3a3a3a", darkcolor="#3a3a3a",
+                        relief="flat", borderwidth=0,
+                        arrowsize=0, width=14)
+        style.map(_name,
+                  background=[("active", "#5a5a5a"), ("pressed", "#6a6a6a")],
+                  arrowcolor=[("active", BG)])
     for _orient in ("Vertical", "Horizontal"):
         _name = _orient + ".TScrollbar"
         style.configure(_name,
@@ -369,8 +438,6 @@ class App:
                    command=self.run_all_patch_check, width=26).pack(side="left", padx=4)
         ttk.Button(f3, text="🚀 智能运行",
                    command=lambda: self.smart_run("patch"), width=18).pack(side="left", padx=6)
-        ttk.Button(f3, text="▶ Patch + Typecheck + 提交",
-                   command=self.run_full, width=30).pack(side="left", padx=4)
 
         self.refresh_patches()
 
@@ -415,6 +482,18 @@ class App:
         _fse.bind("<FocusOut>", lambda e: self._apply_font())
         ttk.Button(rowF, text="应用", command=self._apply_font, width=8).pack(side="left", padx=(16, 0))
         ttk.Label(gFont, text="应用到所有输出区、JSON 输入区。", foreground=FG_MUTED).pack(anchor="w", pady=(6, 0))
+
+        gPy = ttk.LabelFrame(f, text="Python 解释器", padding=10)
+        gPy.pack(fill="x", pady=(0, 10))
+        rowPy = ttk.Frame(gPy)
+        rowPy.pack(fill="x")
+        ttk.Label(rowPy, text="路径:").pack(side="left")
+        self.py_path_var = tk.StringVar(value=self._cfg.get("python_path", ""))
+        _pe2 = ttk.Entry(rowPy, textvariable=self.py_path_var, width=48)
+        _pe2.pack(side="left", padx=6, fill="x", expand=True)
+        _pe2.bind("<Return>", lambda e: self._apply_python_path())
+        _pe2.bind("<FocusOut>", lambda e: self._apply_python_path())
+        ttk.Label(gPy, text="留空=自动探测（项目 venv > PATH > sys.executable）", foreground=FG_MUTED).pack(anchor="w", pady=(6, 0))
 
         g2 = ttk.LabelFrame(f, text="行为", padding=10)
         g2.pack(fill="x", pady=(0, 10))
@@ -507,6 +586,14 @@ class App:
         self.set_status("字体: " + fam + " UI=" + str(ui_size) + " 文本=" + str(size))
         self.log("字体: " + fam + " UI=" + str(ui_size) + " 文本=" + str(size) + "\n")
 
+    def _apply_python_path(self):
+        v = (self.py_path_var.get() or "").strip()
+        self._cfg["python_path"] = v
+        self._save_setting("python_path", v)
+        actual = _find_python(self.work_dir, v or None)
+        self.set_status("Python: " + actual)
+        self.log("Python: " + actual + "\n")
+
     def _apply_source_pref(self):
         v = self.source_pref_var.get()
         if v not in ("input_first", "clipboard_first", "ask"):
@@ -558,10 +645,15 @@ class App:
 
         bar = ttk.Frame(self.tab_files)
         bar.pack(fill="x", padx=12)
-        ttk.Button(bar, text="📂 从 devtasks.json 加载", command=self.load_devtasks).pack(side="left")
-        ttk.Button(bar, text="📋 示例", command=self.load_example).pack(side="left", padx=6)
         ttk.Button(bar, text="🗑 清空", command=lambda: self.ops_text.delete("1.0", "end")).pack(side="left")
         ttk.Button(bar, text="📋 粘贴剪贴板", command=self.paste_from_clipboard, width=16).pack(side="left", padx=6)
+
+        bottom = ttk.Frame(self.tab_files)
+        bottom.pack(fill="x", padx=12, pady=(0, 12))
+        ttk.Button(bottom, text="▶ 执行文件操作",
+                   command=self.run_file_ops, width=20).pack(side="left", padx=2)
+        ttk.Button(bottom, text="🚀 智能运行",
+                   command=lambda: self.smart_run("files"), width=18).pack(side="left", padx=6)
 
         self.ops_text = scrolledtext.ScrolledText(
             self.tab_files, height=16, wrap="word", font=("Consolas", 10),
@@ -571,14 +663,6 @@ class App:
         )
         self.ops_text.pack(fill="both", expand=True, padx=12, pady=6)
 
-        bottom = ttk.Frame(self.tab_files)
-        bottom.pack(fill="x", padx=12, pady=(0, 12))
-        ttk.Button(bottom, text="▶ 执行文件操作",
-                   command=self.run_file_ops, width=20).pack(side="left", padx=2)
-        ttk.Button(bottom, text="🚀 智能运行",
-                   command=lambda: self.smart_run("files"), width=18).pack(side="left", padx=6)
-        ttk.Button(bottom, text="▶ 执行 + Patch + Typecheck",
-                   command=self.run_ops_patch_check, width=30).pack(side="left", padx=6)
 
     # ================= 通用 =================
     def log(self, text):
@@ -712,8 +796,12 @@ class App:
         lines = [l for l in lines if l]
         if not lines or len(lines) > 20:
             return None
-        known = {'npm', 'npx', 'node', 'python', 'python3', 'py', 'git', 'dir', 'type', 'findstr', 'echo', 'del', 'copy', 'move', 'mkdir', 'rmdir', 'cd', 'chdir', 'powershell', 'cmd', 'where', 'taskkill', 'cls', 'attrib', 'ren', 'rename', 'start', 'call', 'set'}
-        bad_start = ('{', '[', '#', '//', '>', '*', '|', '=', '<', '!')
+        known = {"npm", "npx", "node", "python", "python3", "py", "git",
+                 "dir", "type", "findstr", "echo", "del", "copy", "move",
+                 "mkdir", "rmdir", "cd", "chdir", "powershell", "cmd",
+                 "where", "taskkill", "cls", "attrib", "ren", "rename",
+                 "start", "call", "set"}
+        bad_start = ("{", "[", "#", "//", ">", "*", "|", "=", "<", "!")
         ops = []
         for l in lines:
             if l.startswith(bad_start):
@@ -722,11 +810,11 @@ class App:
             if not parts:
                 return None
             first = parts[0].lower()
-            if first not in known:
+            if first in known or _looks_like_powershell(l):
+                ops.append({"op": "shell", "cmd": l})
+            else:
                 return None
-            ops.append({'op': 'shell', 'cmd': l})
         return ops
-
 
     def smart_run(self, source_tab):
         box = self.ops_text.get("1.0", "end").strip()
@@ -879,7 +967,7 @@ class App:
     def _bg_patch(self, name):
         self.clear_log()
         self.set_status("运行 patch...")
-        c = self.run_cmd(_patch_cmd(name))
+        c = self.run_cmd(_patch_cmd(name, self.work_dir, self._cfg.get("python_path")))
         self.log("✅ Patch 成功\n" if c == 0 else "❌ Patch 失败\n")
         self.set_status("patch 完成" if c == 0 else "patch 失败")
         if getattr(self, "_auto_copy_after_run", False):
@@ -1002,7 +1090,7 @@ class App:
     def _bg_patch_check(self, name):
         self.clear_log()
         self.set_status("Patch 中...")
-        if self.run_cmd(_patch_cmd(name)) != 0:
+        if self.run_cmd(_patch_cmd(name, self.work_dir, self._cfg.get("python_path"))) != 0:
             self.log("❌ Patch 失败\n")
             self.set_status("Patch 失败")
             return
@@ -1028,7 +1116,7 @@ class App:
     def _bg_full(self, name, msg):
         self.clear_log()
         self.set_status("① Patch...")
-        if self.run_cmd(_patch_cmd(name)) != 0:
+        if self.run_cmd(_patch_cmd(name, self.work_dir, self._cfg.get("python_path"))) != 0:
             self.log("❌ Patch 失败\n")
             return
         self.log("✅ Patch 成功\n\n")
@@ -1083,7 +1171,12 @@ class App:
         try:
             tasks = json.loads(raw)
         except Exception as e:
-            self.log(f"[JSON 解析失败] {e}\n")
+            self.log(f"[JSON 解析失败] {e}")
+            self.log("")
+            self.log("提示：输入框内容不是合法 JSON。三种用法：")
+            self.log("  1. JSON 数组: [{\"op\":\"write\",\"path\":\"...\",\"content\":\"...\"}]")
+            self.log("  2. 纯 shell 命令: 用「🚀 智能运行」自动识别")
+            self.log("  3. 只运行脚本: 用「🚀 智能运行」")
             return
         if not isinstance(tasks, list):
             self.log("[错误] 顶层应为数组\n")
@@ -1137,11 +1230,24 @@ class App:
                     if not cmd:
                         raise ValueError("empty cmd")
                     cmd = _rewrite_shell_cmd(cmd)
-                    self.log(f"[{i}] shell  $ {cmd}")
-                    sp = subprocess.run(
-                        cmd, cwd=self.work_dir, shell=True, capture_output=True,
-                        text=True, encoding="utf-8", errors="replace",
-                    )
+                    use_psh = _looks_like_powershell(cmd)
+                    self.log(f"[{i}] shell({('psh' if use_psh else 'cmd')})  $ {cmd}")
+                    try:
+                        if use_psh:
+                            sp = subprocess.run(
+                                ["powershell", "-NoProfile", "-Command", cmd],
+                                cwd=self.work_dir, capture_output=True,
+                                text=True, encoding="utf-8", errors="replace",
+                            )
+                        else:
+                            sp = subprocess.run(
+                                cmd, cwd=self.work_dir, shell=True, capture_output=True,
+                                text=True, encoding="utf-8", errors="replace",
+                            )
+                    except Exception as e:
+                        self.log(f"[\u274c] {e}")
+                        fail += 1
+                        continue
                     if sp.stdout:
                         self.log(sp.stdout.rstrip())
                     if sp.stderr:
@@ -1160,7 +1266,6 @@ class App:
                 fail += 1
         return ok, fail
 
-        threading.Thread(target=self._bg_oneclick, daemon=True).start()
 
     def run_oneclick(self):
         threading.Thread(target=self._bg_oneclick, daemon=True).start()
@@ -1209,7 +1314,7 @@ class App:
             self.root.after(0, _switch)
             time.sleep(0.15)
             self.set_status("③ 运行 patch: " + name)
-            if self.run_cmd(_patch_cmd(name)) != 0:
+            if self.run_cmd(_patch_cmd(name, self.work_dir, self._cfg.get("python_path"))) != 0:
                 self.log("❌ " + name + " 运行失败\n")
                 if getattr(self, "copy_after_var", None) and self.copy_after_var.get():
                     self.root.after(0, self._copy_silent)
@@ -1256,7 +1361,7 @@ class App:
         if kind == "node":
             return ["node", name]
         if kind == "python":
-            return ["python", name]
+            return [_find_python(self.work_dir, self._cfg.get("python_path")), name]
         if kind == "powershell":
             return ["powershell", "-ExecutionPolicy", "Bypass", "-File", name]
         if kind == "bash":
@@ -1282,7 +1387,7 @@ class App:
             except Exception as e:
                 self.log(f"[JSON 解析失败] {e}\n")
         self.set_status("② Patch...")
-        if self.run_cmd(_patch_cmd(name)) != 0:
+        if self.run_cmd(_patch_cmd(name, self.work_dir, self._cfg.get("python_path"))) != 0:
             self.log("❌ Patch 失败\n")
             return
         self.log("✅ Patch 成功\n\n")
