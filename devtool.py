@@ -526,9 +526,29 @@ class App:
         self._setup_output_tags()
 
         bar = ttk.Frame(out)
-        bar.pack(fill="x", pady=(8, 0))
-        ttk.Button(bar, text="📋 复制全部输出", command=self.copy_all).pack(side="right")
-        ttk.Button(bar, text="🗑 清空", command=self.clear_log).pack(side="right", padx=6)
+        _copy_btn = ttk.Button(bar, text="📋 复制全部输出", command=self.copy_all)
+        _copy_btn.pack(side="right")
+        _clear_btn = ttk.Button(bar, text="🗑 清空", command=self.clear_log)
+        _clear_btn.pack(side="right", padx=6)
+
+        def _show_bar(e=None):
+            try:
+                bar.place(relx=1.0, rely=0.0, anchor="ne", x=-10, y=10)
+            except Exception:
+                pass
+        def _hide_bar(e=None):
+            try:
+                bar.place_forget()
+            except Exception:
+                pass
+        out.bind("<Enter>", _show_bar)
+        out.bind("<Leave>", _hide_bar)
+        self.output.bind("<Enter>", _show_bar)
+        self.output.bind("<Leave>", _hide_bar)
+        _copy_btn.bind("<Enter>", _show_bar)
+        _copy_btn.bind("<Leave>", _hide_bar)
+        _clear_btn.bind("<Enter>", _show_bar)
+        _clear_btn.bind("<Leave>", _hide_bar)
 
         self._apply_font()
 
@@ -553,7 +573,7 @@ class App:
         f2.pack(fill="x", padx=12, pady=4)
         ttk.Label(f2, text="Commit 信息:").pack(side="left")
         self.msg_var = tk.StringVar()
-        ttk.Entry(f2, textvariable=self.msg_var).pack(side="left", padx=6, fill="x", expand=True)
+        tk.Entry(f2, textvariable=self.msg_var, bg=BG_ENTRY, fg=FG, insertbackground=FG, relief="flat", borderwidth=0, highlightthickness=1, highlightbackground=LINE, highlightcolor=ACCENT).pack(side="left", padx=6, fill="x", expand=True)
         ttk.Button(f2, text="📝 提交", command=self.run_commit, width=10).pack(side="left", padx=2)
         ttk.Button(f2, text="📊 状态", command=self.run_status, width=10).pack(side="left", padx=2)
 
@@ -576,7 +596,7 @@ class App:
         row1 = ttk.Frame(g1)
         row1.pack(fill="x")
         self.work_dir_var = tk.StringVar(value=self.work_dir)
-        _wde = ttk.Entry(row1, textvariable=self.work_dir_var)
+        _wde = tk.Entry(row1, textvariable=self.work_dir_var, bg=BG_ENTRY, fg=FG, insertbackground=FG, relief="flat", borderwidth=0, highlightthickness=1, highlightbackground=LINE, highlightcolor=ACCENT)
         _wde.pack(side="left", fill="x", expand=True, padx=(0, 6))
         _wde.bind("<Return>", lambda e: self._apply_work_dir())
         _wde.bind("<FocusOut>", lambda e: self._apply_work_dir())
@@ -589,7 +609,7 @@ class App:
         rowF.pack(fill="x")
         ttk.Label(rowF, text="字体族:").pack(side="left")
         self.font_family_var = tk.StringVar(value=self._cfg.get("font_family", "Consolas"))
-        _fe = ttk.Entry(rowF, textvariable=self.font_family_var, width=22)
+        _fe = tk.Entry(rowF, textvariable=self.font_family_var, width=22, bg=BG_ENTRY, fg=FG, insertbackground=FG, relief="flat", borderwidth=0, highlightthickness=1, highlightbackground=LINE, highlightcolor=ACCENT)
         _fe.pack(side="left", padx=(6, 16))
         ttk.Label(rowF, text="字号:").pack(side="left")
         self.font_size_var = tk.StringVar(value=str(self._cfg.get("font_size", 10)))
@@ -614,7 +634,7 @@ class App:
         rowPy.pack(fill="x")
         ttk.Label(rowPy, text="路径:").pack(side="left")
         self.py_path_var = tk.StringVar(value=self._cfg.get("python_path", ""))
-        _pe2 = ttk.Entry(rowPy, textvariable=self.py_path_var, width=48)
+        _pe2 = tk.Entry(rowPy, textvariable=self.py_path_var, width=48, bg=BG_ENTRY, fg=FG, insertbackground=FG, relief="flat", borderwidth=0, highlightthickness=1, highlightbackground=LINE, highlightcolor=ACCENT)
         _pe2.pack(side="left", padx=6, fill="x", expand=True)
         _pe2.bind("<Return>", lambda e: self._apply_python_path())
         _pe2.bind("<FocusOut>", lambda e: self._apply_python_path())
@@ -786,32 +806,55 @@ class App:
         )
         info.pack(fill="x", padx=12, pady=(12, 4))
 
-        bar = ttk.Frame(self.tab_files)
-        bar.pack(fill="x", padx=12)
-        ttk.Button(bar, text="🗑 清空", command=lambda: self.ops_text.delete("1.0", "end")).pack(side="left")
-        ttk.Button(bar, text="📋 粘贴剪贴板", command=self.paste_from_clipboard, width=16).pack(side="left", padx=6)
 
         bottom = ttk.Frame(self.tab_files)
-        bottom.pack(fill="x", padx=12, pady=(0, 12))
+        bottom.pack(fill="x", padx=12, pady=(4, 8))
         ttk.Button(bottom, text="▶ 执行文件操作",
                    command=self.run_file_ops, width=20).pack(side="left", padx=2)
         ttk.Button(bottom, text="🚀 智能运行",
                    command=lambda: self.smart_run("files"), width=18).pack(side="left", padx=6)
 
+        input_wrap = ttk.Frame(self.tab_files)
+        input_wrap.pack(fill="both", expand=True, padx=12, pady=6)
+
         self.ops_text = tk.Text(
-            self.tab_files, height=16, wrap="word", font=("Consolas", 10),
+            input_wrap, height=16, wrap="word", font=("Consolas", 10),
             bg=BG_ENTRY, fg=FG, insertbackground=FG,
             selectbackground=ACCENT, selectforeground=BG,
             relief="flat", borderwidth=0,
         )
-        self.ops_text.pack(fill="both", expand=True, padx=12, pady=6)
+        self.ops_text.pack(fill="both", expand=True)
+
         def _ops_wheel(e):
             self.ops_text.yview_scroll(int(-e.delta / 120), "units")
             return "break"
         self.ops_text.bind("<MouseWheel>", _ops_wheel)
 
+        hover = ttk.Frame(input_wrap)
+        _paste_btn = ttk.Button(hover, text="📋 粘贴剪贴板",
+                                command=self.paste_from_clipboard)
+        _paste_btn.pack(side="left", padx=(0, 6))
+        _clear_btn = ttk.Button(hover, text="🗑 清空",
+                                command=lambda: self.ops_text.delete("1.0", "end"))
+        _clear_btn.pack(side="left")
 
-    # ================= 通用 =================
+        def _show_ops_bar(e=None):
+            try:
+                hover.place(relx=1.0, rely=0.0, anchor="ne", x=-10, y=10)
+            except Exception:
+                pass
+        def _hide_ops_bar(e=None):
+            try:
+                hover.place_forget()
+            except Exception:
+                pass
+        self.ops_text.bind("<Enter>", _show_ops_bar)
+        self.ops_text.bind("<Leave>", _hide_ops_bar)
+        _paste_btn.bind("<Enter>", _show_ops_bar)
+        _paste_btn.bind("<Leave>", _hide_ops_bar)
+        _clear_btn.bind("<Enter>", _show_ops_bar)
+        _clear_btn.bind("<Leave>", _hide_ops_bar)
+
     def log(self, text):
         def _do():
             txt = text if text.endswith("\n") else (text + "\n")
