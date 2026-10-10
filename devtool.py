@@ -946,10 +946,14 @@ class App:
 
     # ================= Patch 相关 =================
     def refresh_patches(self):
+        EXCLUDE = {"devtool.py", "devtool_bak.py"}
         try:
             exts = (".cjs", ".js", ".py", ".ps1", ".sh")
             files = sorted(
-                (f for f in os.listdir(self.work_dir) if f.lower().endswith(exts)),
+                (f for f in os.listdir(self.work_dir)
+                 if f.lower().endswith(exts)
+                 and f not in EXCLUDE
+                 and not f.endswith("_bak.py")),
                 key=lambda f: f,
             )
         except OSError:
