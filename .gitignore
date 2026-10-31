@@ -1,40 +1,38 @@
+# dependencies / build
 node_modules/
 dist/
 dist-electron/
+release/
+
+# logs
 *.log
+run.log
+dev.log
+
+# OS
 .DS_Store
+Thumbs.db
 
 # Python (agent-core)
 __pycache__/
 *.pyc
-*.bak
+*.bak*
 
-release/
-<<<<<<< HEAD
-=======
-*.bak
->>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
-run.log
+
+# local snapshots / caches (36MB+, 非源码)
+.easycode/
+sample/.cache/
+
+# archives / local agent state
+*.rar
+.agent/
 
 # local API keys / test files
 agent-API
-<<<<<<< HEAD
 diffstat.txt
 updateplan.md
 
+# devtool 产物
 patch-*.cjs
 patch-*.py
-dev.log
-devtool-config.json 
-=======
-
-# local API keys / test files
-agent-API
-diffstat.txt
-run.log
-*.bak
-updateplan.md
-
-patch-*.cjs
-dev.log
->>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
+devtool-config.json
