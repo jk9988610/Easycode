@@ -38,3 +38,8 @@ updateplan.md
 patch-*.cjs
 patch-*.py
 devtool-config.json
+
+# devtool build artifacts
+devtool_bak.py
+build/
+DevTool.spec
