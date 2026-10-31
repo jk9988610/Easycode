@@ -150,7 +150,6 @@ export async function gitRevParseHead(root: string): Promise<string | null> {
     return { ok: true, ref: list.ok ? list.stdout.trim() : undefined };
   }
   
-<<<<<<< HEAD
   export async function gitStashApply(
     root: string,
     ref: string,
@@ -159,8 +158,6 @@ export async function gitRevParseHead(root: string): Promise<string | null> {
     return res.ok ? { ok: true } : { ok: false, error: res.error };
   }
 
-=======
->>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
   export async function gitStashPop(
     root: string,
     ref?: string,

@@ -21,10 +21,7 @@ import {
   gitRevParseHead,
   gitIsDirty,
   gitStashPush,
-<<<<<<< HEAD
   gitStashApply,
-=======
->>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
   gitStashPop,
   gitStashDrop,
   gitResetHard,
@@ -110,12 +107,16 @@ export class AgentHost {
 
     const env: Record<string, string> = {
       ...process.env,
-      DEEPSEEK_API_KEY: opts.apiKey,
+      QINIU_API_KEY: opts.apiKey,
+      DEEPSEEK_API_KEY: opts.apiKey, // 兼容旧环境变量名
       PYTHONIOENCODING: "utf-8",
       PYTHONUTF8: "1",
       AGENT_WORKSPACE: opts.cwd,
     };
-    if (opts.model) env.DEEPSEEK_MODEL = opts.model;
+    if (opts.model) {
+      env.QINIU_MODEL = opts.model;
+      env.DEEPSEEK_MODEL = opts.model;
+    }
 
     // stdin 必须是 pipe(交互模式需要写入 stdin)
     const proc = spawn(python.command, [...python.args, script, "--interactive"], {
@@ -164,10 +165,7 @@ export class AgentHost {
     let stashRef: string | null = null;
     if (dirty) {
       const stash = await gitStashPush(cwd, `easycode-agent-${id}-${Date.now()}`);
-<<<<<<< HEAD
       if (stash.ref) await gitStashApply(cwd, stash.ref);
-=======
->>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
       if (stash.ok && stash.ref) stashRef = stash.ref;
     }
     this.checkpoints.set(id, { cwd, headSha, stashRef });

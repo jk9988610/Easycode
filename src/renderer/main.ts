@@ -43,10 +43,7 @@ class App {
   });
   private workspace = "";
   private tabs: EditorTab[] = [];
-<<<<<<< HEAD
   private openTabsTimer: number | null = null;
-=======
->>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
   private gitFileStatus = new Map<string, string>();
   private editorDecorations: string[] = [];
   private activeTabId: string | null = null;
@@ -83,13 +80,10 @@ class App {
   private chatMessages: ChatMessage[] = [];
   private chatRunning = false;
   private chatSessionId: string | null = null;
-<<<<<<< HEAD
   private chatSessions: { id: string; title: string; updatedAt: number }[] = [];
   private persistSessionId: string | null = null;
   private persistCreatedAt = 0;
   private persistTimer: number | null = null;
-=======
->>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -190,11 +184,8 @@ class App {
 
     // Agent 事件流 → 聊天消息累积
     window.easycode.onAgentEvent((data) => this.handleAgentEvent(data));
-<<<<<<< HEAD
     void this.restoreChatSession();
     void this.restoreOpenTabs();
-=======
->>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
     window.easycode.onAgentExit((data) => {
       if (data.id === this.chatSessionId) {
         this.chatRunning = false;
@@ -247,6 +238,15 @@ class App {
       void this.ensureTree(this.workspace);
       void window.easycode.watchWorkspace(this.workspace);
     }
+
+    // 首屏渲染完成,移除 loading 骨架
+    const splash = document.getElementById("boot-splash");
+    if (splash) {
+      splash.style.opacity = "0";
+      splash.style.transition = "opacity .15s";
+      setTimeout(() => splash.remove(), 160);
+    }
+    console.log(`[render] first paint ready: ${performance.now().toFixed(0)}ms`);
   }
 
   private applyLspStatus(st: { running: boolean; servers?: string[] }): void {
@@ -1575,9 +1575,27 @@ class App {
     } else if (category === "chat") {
       el.innerHTML = `
         <div class="settings-item">
-          <div class="settings-item-title">DeepSeek API Key</div>
+          <div class="settings-item-title">七牛 API Key</div>
           <div class="settings-item-desc">
-            agent-core 使用的 DeepSeek API Key。获取地址:https://platform.deepseek.com/api-keys
+            agent-core 使用的七牛云 API Key(默认 base_url: https://api.qnaigc.com/v1)。获取地址:https://portal.qiniu.com/ai/console/apikey
+          </div>
+          <input type="password" id="set-qiniuKey" value="${escapeAttr(
+            this.settings.qiniuApiKey || "",
+          )}" placeholder="sk-..." style="width:100%;max-width:480px" />
+        </div>
+        <div class="settings-item">
+          <div class="settings-item-title">模型名称</div>
+          <div class="settings-item-desc">
+            七牛 API 的模型 id。默认 qiniu/conatus-free。如需支持 function calling 的更强模型可在此填写。
+          </div>
+          <input type="text" id="set-agentModel" value="${escapeAttr(
+            this.settings.agentModel || "qiniu/conatus-free",
+          )}" placeholder="qiniu/conatus-free" style="width:100%;max-width:480px" />
+        </div>
+        <div class="settings-item">
+          <div class="settings-item-title">旧 API Key(DeepSeek 兼容,可留空)</div>
+          <div class="settings-item-desc">
+            若不填七牛 Key,则回退到此 Key(并走 api.deepseek.com)。
           </div>
           <input type="password" id="set-agentKey" value="${escapeAttr(
             this.settings.agentApiKey || "",
@@ -1600,7 +1618,7 @@ class App {
       if ("showPanel" in patch && this.settings.showPanel) {
         this.renderBottomPanel();
       }
-      if ("agentApiKey" in patch) {
+      if ("agentApiKey" in patch || "qiniuApiKey" in patch || "agentModel" in patch) {
         this.renderRightbar();
       }
     };
@@ -1644,6 +1662,21 @@ class App {
     el.querySelector("#set-agentKey")?.addEventListener("change", () => {
       void persist({
         agentApiKey: (el.querySelector("#set-agentKey") as HTMLInputElement).value,
+      });
+    });
+    el.querySelector("#set-qiniuKey")?.addEventListener("input", () => {
+      void persist({
+        qiniuApiKey: (el.querySelector("#set-qiniuKey") as HTMLInputElement).value,
+      });
+    });
+    el.querySelector("#set-qiniuKey")?.addEventListener("change", () => {
+      void persist({
+        qiniuApiKey: (el.querySelector("#set-qiniuKey") as HTMLInputElement).value,
+      });
+    });
+    el.querySelector("#set-agentModel")?.addEventListener("change", () => {
+      void persist({
+        agentModel: (el.querySelector("#set-agentModel") as HTMLInputElement).value,
       });
     });
   }
@@ -1694,10 +1727,7 @@ class App {
   }
 
   private renderTabs(): void {
-<<<<<<< HEAD
     this.scheduleSaveOpenTabs();
-=======
->>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
     const el = this.root.querySelector(".tabs");
     if (!el) return;
     if (!this.tabs.length) {
@@ -1941,10 +1971,7 @@ class App {
       this.editor.onDidChangeCursorPosition((e) => {
         this.cursorLabel = `Ln ${e.position.lineNumber}, Col ${e.position.column}`;
         this.renderStatus();
-<<<<<<< HEAD
         this.scheduleSaveOpenTabs();
-=======
->>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
       });
       this.editor.onDidChangeModelContent(() => {
         if (this.ignoringModelChange) return;
@@ -2003,10 +2030,7 @@ class App {
   }
 
   private renderRightbar(): void {
-<<<<<<< HEAD
     this.schedulePersist();
-=======
->>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
     const body = this.root.querySelector(".rightbar-body") as HTMLElement | null;
     if (!body) return;
     const view = this.settings.rightView || "info";
@@ -2022,24 +2046,15 @@ class App {
   // --- Agent chat rendering & logic ---
 
   private renderChatHtml(): string {
-<<<<<<< HEAD
     const messages = this.renderChatBlocks();
-=======
-    const messages = this.chatMessages.length
-      ? this.chatMessages
-          .map((m) => this.renderChatMessage(m))
-          .join("")
-      : `<div class="chat-empty">开始新的对话</div>`;
->>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
-    const apiKeyOk = !!this.settings.agentApiKey;
+    const apiKeyOk = !!(this.settings.qiniuApiKey || this.settings.agentApiKey);
     const placeholder = apiKeyOk
-      ? "描述任务,支持多轮对话。例如:读取 main.ts,然后给它加注释"
-      : "请先在设置中填写 DeepSeek API Key";
+      ? ""
+      : "请先在设置 → 聊天 中填入 API Key";
     const disabled = !apiKeyOk || this.chatRunning;
     const hasHistory = this.chatMessages.length > 0;
     return `
       <div class="chat-pane">
-<<<<<<< HEAD
         <div class="chat-header">
           <select data-chat-sessions title="历史对话">
             ${this.chatSessions.length
@@ -2048,8 +2063,6 @@ class App {
           </select>
           <button type="button" data-chat-new title="新建对话">+ 新建</button>
         </div>
-=======
->>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
         <div class="chat-stream" data-chat-stream>
           ${messages}
         </div>
@@ -2073,52 +2086,66 @@ class App {
       </div>`;
   }
 
-<<<<<<< HEAD
   private renderChatBlocks(): string {
     const parts: string[] = [];
-    const PIC = String.fromCharCode(0x1F4DD);
+    const PIC = String.fromCharCode(0x203A);  // › 用户消息前缀
     let i = 0;
     while (i < this.chatMessages.length) {
       const m = this.chatMessages[i];
-      const isUser = m.kind === "final" && m.text && m.text.startsWith(PIC + " ");
+      const isUser = m.kind === "final" && m.text && (m.text.startsWith(PIC + " ") || m.text.startsWith("📝 "));
       if (isUser) {
-        parts.push(this.renderChatMessage(m));
+        const userText = (m.text || "").replace(/^(›|📝) /, "");
+        parts.push(
+          `<div class="chat-msg user"><span class="chat-role">你</span><div class="chat-md">${this.renderMiniMarkdown(userText)}</div></div>`
+        );
         i++;
         continue;
       }
+
       const block: ChatMessage[] = [];
       let finalMsg: ChatMessage | null = null;
       while (i < this.chatMessages.length) {
         const x = this.chatMessages[i];
-        const xUser = x.kind === "final" && x.text && x.text.startsWith(PIC + " ");
+        const xUser = x.kind === "final" && x.text && (x.text.startsWith(PIC + " ") || x.text.startsWith("📝 "));
         if (xUser) break;
-        if (x.kind === "final") { finalMsg = x; i++; break; }
+        if (x.kind === "final") {
+          // 只有非空文本才认为是最终的 AI 回复
+          if (x.text && x.text.trim()) {
+            finalMsg = x;
+          }
+          i++;
+          break;
+        }
         block.push(x);
         i++;
       }
+
+      // 渲染工具调用过程
       if (block.length > 0) {
-        const firstTs = block[0].ts;
-        const lastTs = block[block.length - 1].ts;
-        const elapsed = Math.max(0, Math.round((lastTs - firstTs) / 1000));
-        const steps = block.filter((x) => x.kind === "tool_call").length;
-        const timeStr = elapsed < 60 ? elapsed + "s" : Math.floor(elapsed / 60) + "m " + (elapsed % 60) + "s";
-        const label = finalMsg
-          ? "已完成 " + steps + " 步 · 用时 " + timeStr
-          : "进行中 " + steps + " 步 · " + timeStr;
-        const openAttr = finalMsg ? "" : " open";
-        const body = block.map((x) => this.renderChatMessage(x)).join("");
-        parts.push(`<details class="chat-work"${openAttr}><summary class="chat-work-summary">${label}</summary><div class="chat-work-body">${body}</div></details>`);
-      }
-      if (finalMsg) {
-        const html = this.renderChatMessage(finalMsg);
-        const marker = `<div class="chat-msg final"><span class="chat-icon">`;
-        const closePos = html.indexOf(`</span>`);
-        if (html.startsWith(marker) && closePos > 0) {
-          const head = html.slice(0, closePos + 7);
-          parts.push(head + `<div class="chat-md">${this.renderMiniMarkdown(finalMsg.text || "")}</div></div>`);
-        } else {
-          parts.push(html);
+        // 过滤掉纯空的 thinking
+        const visibleBlocks = block.filter(x => {
+          if (x.kind === "thinking") return !!(x.text && x.text.trim());
+          return true;
+        });
+        if (visibleBlocks.length > 0) {
+          const toolNames = visibleBlocks.filter(x => x.kind === "tool_call").map(x => x.toolName || "?");
+          const steps = toolNames.length;
+          const uniq = Array.from(new Set(toolNames));
+          const toolsSummary = uniq.length > 0 ? ` · 工具: ${uniq.join(", ")}` : "";
+          const label = finalMsg
+            ? `执行了 ${steps} 次工具调用${toolsSummary}`
+            : `执行中... ${steps} 次工具调用${toolsSummary}`;
+          // 默认展开，不要让用户点
+          const body = visibleBlocks.map((x) => this.renderChatMessage(x)).join("");
+          parts.push(`<details class="chat-work" open><summary class="chat-work-summary">${label}</summary><div class="chat-work-body">${body}</div></details>`);
         }
+      }
+
+      // 渲染 AI 的最终回复
+      if (finalMsg) {
+        const text = (finalMsg.text || "").trim();
+        const body = this.renderMiniMarkdown(text);
+        parts.push(`<div class="chat-msg ai"><span class="chat-role">AI</span><div class="chat-md">${body}</div></div>`);
       }
     }
     return parts.length ? parts.join("") : `<div class="chat-empty">开始新的对话</div>`;
@@ -2162,15 +2189,10 @@ class App {
     return out.join("");
   }
 
-=======
->>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
   private renderChatMessage(m: ChatMessage): string {
     const esc = escapeHtml;
     if (m.kind === "thinking")
-      return `<div class="chat-msg thinking"><span class="chat-icon">💭</span><span>${esc(
-        m.text || "",
-      )}</span></div>`;
-<<<<<<< HEAD
+      return `<div class="chat-msg thinking"><span>${esc(m.text || "")}</span></div>`;
     if (m.kind === "tool_call") {
       let argsHtml = esc(m.toolArgs || "");
       try {
@@ -2181,34 +2203,29 @@ class App {
           argsHtml = argsHtml.split(escP).join(`<a class="chat-file-link" data-open-file="${safeP}" href="#">${escP}</a>`);
         }
       } catch { /* ignore */ }
-      return `<div class="chat-msg tool-call"><span class="chat-icon">🔧</span><span><b>${esc(m.toolName || "")}</b>(${argsHtml})</span></div>`;
+      return `<div class="chat-msg tool-call"><span><b>${esc(m.toolName || "")}</b>(${argsHtml})</span></div>`;
     }
-=======
-    if (m.kind === "tool_call")
-      return `<div class="chat-msg tool-call"><span class="chat-icon">🔧</span><span><b>${esc(
-        m.toolName || "",
-      )}</b>(${esc(m.toolArgs || "")})</span></div>`;
->>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
-    if (m.kind === "tool_result")
-      return `<div class="chat-msg tool-result"><span class="chat-icon">📄</span><pre class="chat-pre">${esc(
-        (m.toolResult || "").slice(0, 500),
-      )}</pre></div>`;
+    if (m.kind === "tool_result") {
+      const raw = m.toolResult || "";
+      const MAX = 20000;
+      const shown = raw.length > MAX
+        ? raw.slice(0, MAX) + `\n\n... (已截断,原始 ${raw.length} 字符)`
+        : raw;
+      return `<div class="chat-msg tool-result"><pre class="chat-pre">${esc(shown)}</pre></div>`;
+    }
     if (m.kind === "verify_result") {
       const ok = (m as unknown as { ok?: boolean }).ok !== false;
       const cls = ok ? "final" : "error";
-      const icon = ok ? "✔" : "✘";
-      return `<div class="chat-msg ${cls}"><span class="chat-icon">${icon}</span><span>${esc(
-        m.text || "",
-      )}</span></div>`;
+      return `<div class="chat-msg ${cls}"><span>${esc(m.text || "")}</span></div>`;
     }
     if (m.kind === "error")
-      return `<div class="chat-msg error"><span class="chat-icon">❌</span><span>${esc(
+      return `<div class="chat-msg error"><span>错误: ${esc(
         m.message || m.text || "",
       )}</span></div>`;
-    // final
-    return `<div class="chat-msg final"><span class="chat-icon">✅</span><span>${esc(
-      m.text || "",
-    )}</span></div>`;
+    if (m.kind === "stopped")
+      return `<div class="chat-msg error"><span>已达到轮次上限，本轮任务未完成。可继续发消息让 agent 接着处理。</span></div>`;
+    // final 兜底(正常由 renderChatBlocks 单独渲染)
+    return `<div class="chat-msg ai"><div class="chat-md">${this.renderMiniMarkdown(m.text || "")}</div></div>`;
   }
 
   private bindChatEvents(): void {
@@ -2222,7 +2239,6 @@ class App {
     stopBtn?.addEventListener("click", () => this.stopChat());
     clearBtn?.addEventListener("click", () => void this.clearChat());
     body.querySelector("[data-chat-rollback-bar]")?.addEventListener("click", () => void this.rollbackChat());
-<<<<<<< HEAD
     const _sel = body.querySelector("[data-chat-sessions]") as HTMLSelectElement | null;
     _sel?.addEventListener("change", () => void this.switchChatSession(_sel.value));
     body.querySelector("[data-chat-new]")?.addEventListener("click", () => void this.newChatSession());
@@ -2233,8 +2249,6 @@ class App {
         if (p) void this.openFile(p);
       });
     });
-=======
->>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
     input?.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
@@ -2248,7 +2262,6 @@ class App {
     if (stream) stream.scrollTop = stream.scrollHeight;
   }
 
-<<<<<<< HEAD
   private buildChatPayload(userText: string): string {
     const tab = this.activeTab();
     if (!tab || tab.kind === "diff") return userText;
@@ -2284,8 +2297,6 @@ class App {
     return header + selBlock + NL2 + "用户问题: " + userText;
   }
 
-=======
->>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
   private async sendChatMessage(): Promise<void> {
     const input = this.root.querySelector(
       "[data-chat-input]",
@@ -2295,13 +2306,10 @@ class App {
     if (!task || this.chatRunning) return;
     input.value = "";
     this.chatRunning = true;
-<<<<<<< HEAD
     const payload = this.buildChatPayload(task);
-=======
->>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
 
     // 显示用户消息
-    this.chatMessages.push({ ts: Date.now(), kind: "final", text: `📝 ${task}` });
+    this.chatMessages.push({ ts: Date.now(), kind: "final", text: `› ${task}` });
     this.renderRightbar();
 
     try {
@@ -2309,11 +2317,7 @@ class App {
         // 首条消息:启动交互式会话,会话就绪后自动发送
         this.chatSessionId = await window.easycode.agentStart();
       }
-<<<<<<< HEAD
       await window.easycode.agentSend(this.chatSessionId, payload);
-=======
-      await window.easycode.agentSend(this.chatSessionId, task);
->>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
     } catch (e) {
       this.chatMessages.push({
         ts: Date.now(),
@@ -2326,7 +2330,6 @@ class App {
     this.renderRightbar();
   }
 
-<<<<<<< HEAD
   private async restoreChatSession(): Promise<void> {
     try {
       const list = await window.easycode.listSessions();
@@ -2488,19 +2491,14 @@ class App {
     this.renderRightbar();
   }
 
-=======
->>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
   private async clearChat(): Promise<void> {
     if (this.chatSessionId) {
       await window.easycode.agentClear(this.chatSessionId);
     }
     this.chatMessages = [];
     this.chatRunning = false;
-<<<<<<< HEAD
     this.persistSessionId = null;
     this.persistCreatedAt = 0;
-=======
->>>>>>> 692ecb0ced3eafe04201cb05dc2e9c8fa3508ae3
     this.renderRightbar();
   }
 
@@ -2941,7 +2939,7 @@ class App {
         )}</button>
         <span class="status-item">Spaces: 2</span>
         <span class="status-item">${tab ? this.detectEol(tab.content) : "LF"}</span>
-        <button type="button" class="status-item" data-act="notify" title="通知（占位）">🔔</button>
+        <button type="button" class="status-item" data-act="notify" title="通知（占位）"><svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 2a4 4 0 0 0-4 4v3l-1.5 3h11L12 9V6a4 4 0 0 0-4-4z"/><path d="M6.5 13.5a1.5 1.5 0 0 0 3 0"/></svg></button>
       </div>`;
     el.querySelector('[data-act="problems"]')?.addEventListener("click", () =>
       void this.setPanelView("problems"),
@@ -3050,11 +3048,11 @@ function escapeAttr(s: string): string {
 }
 
 const CODICON_MAP: Record<string, string> = {
-  tools: "🔨",
+  tools: "⚒",
   zap: "⚡",
-  "radio-tower": "📡",
+  "radio-tower": "◈",
   "run-all": "▶",
-  "file-code": "📑",
+  "file-code": "▤",
   check: "✓",
   "sync~spin": "⟳",
 };
@@ -3063,7 +3061,14 @@ function formatCodicons(text: string): string {
   return text.replace(/\$\(([^)]+)\)/g, (_, name: string) => CODICON_MAP[name] || "");
 }
 
+// 渲染进程启动计时(仅开发时看,生产也留着便于排查)
+const __rT0 = performance.now();
+console.log(`[render] module loaded: ${__rT0.toFixed(0)}ms`);
+
 const appRoot = document.getElementById("app");
 if (appRoot) {
-  void new App(appRoot).start();
+  const __app = new App(appRoot);
+  __app.start().then(() => {
+    console.log(`[render] App.start() done: ${performance.now().toFixed(0)}ms`);
+  });
 }
