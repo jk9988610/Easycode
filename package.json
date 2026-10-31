@@ -13,7 +13,9 @@
     "build": "npm run build:electron && vite build",
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win nsis",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "keywords": [
     "editor",
@@ -33,6 +35,7 @@
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2",
     "vite": "^6.3.5",
+    "vitest": "^3.2.4",
     "wait-on": "^9.1.0"
   },
   "dependencies": {
