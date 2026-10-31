@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
+import { spawn } from "node:child_process";
 import { gitStatus, gitStage, gitUnstage, gitCommit, gitDiff, gitShow } from "./git";
 import path from "node:path";
 import fs from "node:fs";
@@ -50,6 +51,8 @@ function loadSettingsSafe(): AppSettings {
       rightView: "info",
       defaultTerminal: "powershell",
       agentApiKey: "",
+      qiniuApiKey: "",
+      agentModel: "qiniu/conatus-free",
       pluginsEnabled: {},
       extensionSettings: {},
       configuration: {},
@@ -59,6 +62,57 @@ function loadSettingsSafe(): AppSettings {
 
 function preloadPath(): string {
   return path.join(__dirname, "preload.cjs");
+}
+
+/**
+ * 轮询 Easycode 自身的 .easycode/need_restart 标记。
+ * Agent 改完 Easycode 自己的代码、typecheck 通过后会写这个标记，
+ * 主进程发现后 app.relaunch() 重启。
+ */
+function startRestartPoll(): void {
+  const easycodeDir = path.join(app.getAppPath(), ".easycode");
+  const flagPath = path.join(easycodeDir, "need_restart");
+  const cpPath = path.join(easycodeDir, "checkpoint.json");
+  let warned = false;
+  setInterval(() => {
+    try {
+      if (!fs.existsSync(flagPath)) return;
+      const reason = fs.readFileSync(flagPath, "utf-8").trim() || "agent";
+      fs.unlinkSync(flagPath);
+      console.log(`[restart] detected need_restart (reason=${reason}), relaunching...`);
+      try {
+        fs.mkdirSync(easycodeDir, { recursive: true });
+        fs.writeFileSync(cpPath, JSON.stringify({
+          reason,
+          timestamp: new Date().toISOString(),
+          pid: process.pid,
+        }), "utf-8");
+      } catch {}
+      // supervised 模式:spawn launch.ps1(它有 watchdog + 回滚能力)
+      // 非 supervised 模式(如 npm run dev):直接 app.relaunch()
+      if (process.env.EASYCODE_SUPERVISED === "1") {
+        const launcher = path.join(app.getAppPath(), "launch.ps1");
+        if (fs.existsSync(launcher)) {
+          console.log(`[restart] spawning launcher: ${launcher}`);
+          spawn("powershell", ["-ExecutionPolicy", "Bypass", "-File", launcher], {
+            detached: true,
+            stdio: "ignore",
+            windowsHide: true,
+          }).unref();
+          app.exit(0);
+          return;
+        }
+      }
+      console.log(`[restart] unsupervised, using app.relaunch()`);
+      app.relaunch();
+      app.exit(0);
+    } catch (e) {
+      if (!warned) {
+        console.error("[restart] poll error:", e);
+        warned = true;
+      }
+    }
+  }, 1000);
 }
 
 function createWindow(): void {
@@ -89,11 +143,38 @@ function createWindow(): void {
     void mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
   }
 
+  const __t = () => Date.now() - ((globalThis as any).__easycodeT0 ?? Date.now());
+  mainWindow.webContents.on("did-start-loading", () => {
+    console.log(`[startup] did-start-loading: ${__t()}ms`);
+  });
+  mainWindow.webContents.on("dom-ready", () => {
+    console.log(`[startup] dom-ready: ${__t()}ms`);
+  });
+  (mainWindow.webContents as any).on("console-message", (...args: any[]) => {
+    const d = typeof args[1] === "object" && args[1] !== null ? args[1] : { message: args[2] };
+    const msg = d?.message ?? "";
+    if (msg) console.log(`[renderer] ${msg}`);
+  });
+
+  const __t0 = (globalThis as any).__easycodeT0 ?? Date.now();
   mainWindow.once("ready-to-show", () => {
+    const elapsed = Date.now() - __t0;
+    console.log(`[startup] ready-to-show: ${elapsed}ms`);
     mainWindow?.show();
+    setImmediate(() => (globalThis as any).__initHosts?.());
+    // 窗口可见后再启动 LSP:首屏不付 LSP 启动成本,用户输入前也感知不到差异
+    const ws = settings.lastWorkspace;
+    if (ws) {
+      setTimeout(() => {
+        void restartLanguageServers(ws).catch((e) =>
+          console.error("[lsp] start failed", e),
+        );
+      }, 800);
+    }
   });
 
   mainWindow.webContents.on("did-finish-load", () => {
+    console.log(`[startup] did-finish-load: ${Date.now() - ((globalThis as any).__easycodeT0 ?? Date.now())}ms`);
     void reloadExtensions();
   });
 
@@ -265,11 +346,19 @@ ipcMain.handle("term:list", () => terminalHost?.list() ?? []);
   // --- Agent (agent-core Python 子进程,交互式长对话) ---
   ipcMain.handle("agent:start", () => {
     if (!agentHost) throw new Error("agent host 未初始化");
-    const apiKey = settings.agentApiKey;
-    if (!apiKey) throw new Error("未配置 DeepSeek API Key,请在设置中填写");
+    // 优先七牛 Key(设置页填 > 环境变量),其次兼容旧的 DeepSeek Key
+    const apiKey =
+      settings.qiniuApiKey ||
+      process.env.QINIU_API_KEY ||
+      settings.agentApiKey ||
+      process.env.DEEPSEEK_API_KEY;
+    if (!apiKey) {
+      throw new Error("未配置 API Key。请在设置 → 聊天 中填写七牛 API Key");
+    }
+    const model = settings.agentModel || process.env.QINIU_MODEL || undefined;
     const cwd = settings.lastWorkspace;
     if (!cwd || !fs.existsSync(cwd)) throw new Error("未打开工作区,无法启动 agent");
-    return agentHost.startSession({ cwd, apiKey });
+    return agentHost.startSession({ cwd, apiKey, model });
   });
   ipcMain.handle("agent:send", (_e, id: string, content: string) => {
     agentHost?.send(id, content);
@@ -512,79 +601,94 @@ function buildMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+(globalThis as any).__easycodeT0 = Date.now();
 app.whenReady().then(async () => {
+  console.log(`[startup] whenReady: ${Date.now() - (globalThis as any).__easycodeT0}ms`);
   app.setName("Easycode");
-  settings = loadSettings();
-  const extRoot = path.join(app.getPath("userData"), "extensions");
-  fs.mkdirSync(extRoot, { recursive: true });
-  pluginHost = new PluginHost(extRoot, settings);
-  fileWatcher = new FileWatcher((event) => {
-    if (!mainWindow) return;
-    if (event.type === "change") {
-      mainWindow.webContents.send("fs:changed", { path: event.path });
-    } else if (event.type === "unlink") {
-      mainWindow.webContents.send("fs:deleted", { path: event.path });
-    } else if (event.type === "tree") {
-      mainWindow.webContents.send("fs:tree", {
-        path: event.path,
-        root: event.root,
-      });
-    }
-  });
-  terminalHost = new TerminalHost({
-    onData: (id, data) => {
-      mainWindow?.webContents.send("term:data", { id, data });
-    },
-    onExit: (id, code) => {
-      mainWindow?.webContents.send("term:exit", { id, code });
-    },
-  });
-  agentHost = new AgentHost({
-    onEvent: (id, event: AgentEvent) => {
-      mainWindow?.webContents.send("agent:event", { id, ...event });
-    },
-    onExit: (id, code) => {
-      mainWindow?.webContents.send("agent:exit", { id, code });
-    },
-  });
-  extensionHost = new ExtensionHost(
-    createExtensionBridge({
-      getWorkspace: () => settings.lastWorkspace || null,
-      getUserConfig: (key) => settings.configuration?.[key],
-      getConfigDefaults: () => extensionHost?.getConfigurationDefaults() || {},
-      terminalHost: () => terminalHost,
-      defaultShell: () => settings.defaultTerminal || "powershell",
-      send: (channel, payload) => {
-        mainWindow?.webContents.send(channel, payload);
-      },
-      onBuiltin: async (command, args) => {
-        if (command === "easycode.showOutput") {
-          mainWindow?.webContents.send("ext:showPanel", "output");
-          return;
-        }
-        if (command === "easycode.showTerminal") {
-          mainWindow?.webContents.send("ext:showPanel", "terminal");
-          return;
-        }
-        if (command === "workbench.action.focusActiveEditorGroup") {
-          mainWindow?.webContents.send("ext:focusEditor");
-          return;
-        }
-        if (command === "clangd.restart" || command === "easycode.lspRestart") {
-          await restartLanguageServers();
-          return lspStatusPayload();
-        }
-        console.warn("[ext] unknown command", command, args);
-      },
-    }),
-  );
+  // 快速路径(VS Code 式):先注册 IPC 并创建窗口,让渲染进程尽早开始加载首屏。
+  // 各 Host 与 LSP 的初始化不再阻塞窗口创建。
   registerIpc();
   buildMenu();
   createWindow();
+  console.log(`[startup] window created: ${Date.now() - (globalThis as any).__easycodeT0}ms`);
+  settings = loadSettings();
 
-  if (settings.lastWorkspace) {
-    await restartLanguageServers(settings.lastWorkspace);
-  }
+  // Host 初始化推迟到首屏可见后(setImmediate),避免阻塞窗口
+  (globalThis as any).__initHosts = () => {
+    const extRoot = path.join(app.getPath("userData"), "extensions");
+    fs.mkdirSync(extRoot, { recursive: true });
+    pluginHost = new PluginHost(extRoot, settings);
+    fileWatcher = new FileWatcher((event) => {
+      if (!mainWindow) return;
+      if (event.type === "change") {
+        mainWindow.webContents.send("fs:changed", { path: event.path });
+      } else if (event.type === "unlink") {
+        mainWindow.webContents.send("fs:deleted", { path: event.path });
+      } else if (event.type === "tree") {
+        mainWindow.webContents.send("fs:tree", {
+          path: event.path,
+          root: event.root,
+        });
+      }
+    });
+    terminalHost = new TerminalHost({
+      onData: (id, data) => {
+        mainWindow?.webContents.send("term:data", { id, data });
+      },
+      onExit: (id, code) => {
+        mainWindow?.webContents.send("term:exit", { id, code });
+      },
+    });
+    agentHost = new AgentHost({
+      onEvent: (id, event: AgentEvent) => {
+        mainWindow?.webContents.send("agent:event", { id, ...event });
+      },
+      onExit: (id, code) => {
+        mainWindow?.webContents.send("agent:exit", { id, code });
+      },
+    });
+    extensionHost = new ExtensionHost(
+      createExtensionBridge({
+        getWorkspace: () => settings.lastWorkspace || null,
+        getUserConfig: (key) => settings.configuration?.[key],
+        getConfigDefaults: () => extensionHost?.getConfigurationDefaults() || {},
+        terminalHost: () => terminalHost,
+        defaultShell: () => settings.defaultTerminal || "powershell",
+        send: (channel, payload) => {
+          mainWindow?.webContents.send(channel, payload);
+        },
+        onBuiltin: async (command, args) => {
+          if (command === "easycode.showOutput") {
+            mainWindow?.webContents.send("ext:showPanel", "output");
+            return;
+          }
+          if (command === "easycode.showTerminal") {
+            mainWindow?.webContents.send("ext:showPanel", "terminal");
+            return;
+          }
+          if (command === "workbench.action.focusActiveEditorGroup") {
+            mainWindow?.webContents.send("ext:focusEditor");
+            return;
+          }
+          if (command === "clangd.restart" || command === "easycode.lspRestart") {
+            await restartLanguageServers();
+            return lspStatusPayload();
+          }
+          console.warn("[ext] unknown command", command, args);
+        },
+      }),
+    );
+
+    // Host 就绪后主动加载一次扩展(did-finish-load 可能早于 Host 就绪而空跑)
+    void reloadExtensions();
+    console.log(`[startup] hosts ready: ${Date.now() - (globalThis as any).__easycodeT0}ms`);
+  };
+
+  // LSP 启动已移到 createWindow 的 ready-to-show 回调(窗口可见后 800ms),
+  // 这里不再同步/异步启动,彻底移出首屏路径。
+
+  // 启动 need_restart 轮询(Agent 改 Easycode 自身代码后触发重启)
+  startRestartPoll();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

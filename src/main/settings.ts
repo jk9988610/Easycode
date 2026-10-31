@@ -29,6 +29,10 @@ export interface AppSettings {
   defaultTerminal: "powershell" | "cmd" | "gitbash";
   /** DeepSeek API key for agent-core. */
   agentApiKey: string;
+  /** Qiniu cloud API key (agent-core, base_url https://api.qnaigc.com/v1). */
+  qiniuApiKey: string;
+  /** Model id passed to agent-core (default qiniu/conatus-free). */
+  agentModel: string;
   /** Reserved for future extension-contributed language servers. */
   pluginsEnabled: Record<string, boolean>;
   extensionSettings: Record<string, Record<string, unknown>>;
@@ -56,6 +60,8 @@ const DEFAULTS: AppSettings = {
   rightView: "info",
   defaultTerminal: "powershell",
   agentApiKey: "",
+  qiniuApiKey: "",
+  agentModel: "qiniu/conatus-free",
   pluginsEnabled: {},
   extensionSettings: {},
   configuration: {},

@@ -55,6 +55,8 @@ export interface AppSettings {
   rightView: RightView;
   defaultTerminal: ShellKind;
   agentApiKey: string;
+  qiniuApiKey: string;
+  agentModel: string;
   pluginsEnabled: Record<string, boolean>;
   extensionSettings: Record<string, Record<string, unknown>>;
   configuration: Record<string, unknown>;
@@ -113,7 +115,7 @@ export interface ChatMessage {
   /** 渲染进程生成的时间戳,用于排序 */
   ts: number;
   /** 消息类型 */
-  kind: "thinking" | "tool_call" | "tool_result" | "verify_result" | "final" | "error";
+  kind: "thinking" | "tool_call" | "tool_result" | "verify_result" | "final" | "error" | "retry" | "stopped";
   /** 工具名(tool_call/tool_result) */
   toolName?: string;
   /** 工具参数(tool_call) */
