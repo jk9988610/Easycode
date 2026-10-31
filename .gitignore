@@ -17,6 +17,8 @@ Thumbs.db
 __pycache__/
 *.pyc
 *.bak*
+.pytest_cache/
+
 
 
 # local snapshots / caches (36MB+, 非源码)
