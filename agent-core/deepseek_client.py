@@ -12,10 +12,13 @@ _client: OpenAI | None = None
 
 def _raise_missing_key() -> None:
     raise SystemExit(
-        "[配置错误] 请先设置环境变量 DEEPSEEK_API_KEY:\n"
-        "  PowerShell: $env:DEEPSEEK_API_KEY='sk-你的key'\n"
-        "  CMD:       set DEEPSEEK_API_KEY=sk-你的key\n"
-        "  Linux/Mac:   export DEEPSEEK_API_KEY=sk-你的key"
+        "[配置错误] 请先设置环境变量 QINIU_API_KEY(或 DEEPSEEK_API_KEY):\n"
+        "  PowerShell: $env:QINIU_API_KEY='你的key'\n"
+        "  CMD:       set QINIU_API_KEY=你的key\n"
+        "  Linux/Mac:  export QINIU_API_KEY=你的key\n"
+        "\n可选环境变量:\n"
+        "  QINIU_BASE_URL  默认 https://api.qnaigc.com/v1\n"
+        "  QINIU_MODEL     默认 qiniu/conatus-free"
     )
 
 
@@ -23,10 +26,11 @@ def get_client() -> OpenAI:
     """获取(首次调用时创建)OpenAI 兼容客户端。"""
     global _client
     if _client is None:
-        api_key = os.environ.get("DEEPSEEK_API_KEY")
+        api_key = os.environ.get("QINIU_API_KEY") or os.environ.get("DEEPSEEK_API_KEY")
         if not api_key:
             _raise_missing_key()
-        _client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+        base_url = os.environ.get("QINIU_BASE_URL", "https://api.qnaigc.com/v1")
+        _client = OpenAI(api_key=api_key, base_url=base_url)
     return _client
 
 

@@ -1,11 +1,11 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell, clipboard } from "electron";
 import { spawn } from "node:child_process";
 import { gitStatus, gitStage, gitUnstage, gitCommit, gitDiff, gitShow } from "./git";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { loadSettings, saveSettings, AppSettings } from "./settings";
-import { listDirChildren, readTextFile, writeTextFile, fileExists } from "./fsService";
+import { listDirChildren, readTextFile, writeTextFile, fileExists, searchWorkspace, type SearchOptions } from "./fsService";
 import { LanguageServerSession } from "./languageServer";
 import { PluginHost } from "./plugins";
 import { TerminalHost, type ShellKind } from "./terminal";
@@ -282,6 +282,9 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("fs:listDir", (_e, dirPath: string) => listDirChildren(dirPath));
+  ipcMain.handle("fs:search", (_e, root: string, opts: SearchOptions) =>
+    searchWorkspace(root, opts),
+  );
   ipcMain.handle(
     "fs:readFile",
     (
@@ -314,6 +317,57 @@ function registerIpc(): void {
   ipcMain.handle("fs:watchWorkspace", (_e, root: string) => {
     if (root) fileWatcher?.watchWorkspace(root);
     else fileWatcher?.unwatchWorkspace();
+  });
+  ipcMain.handle("fs:deletePath", (_e, targetPath: string) => {
+    try {
+      const st = fs.lstatSync(targetPath);
+      if (st.isDirectory()) fs.rmSync(targetPath, { recursive: true, force: true });
+      else fs.unlinkSync(targetPath);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  });
+  ipcMain.handle("fs:rename", (_e, from: string, to: string) => {
+    try {
+      fs.renameSync(from, to);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  });
+  ipcMain.handle("fs:mkdir", (_e, dirPath: string) => {
+    try {
+      fs.mkdirSync(dirPath, { recursive: true });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  });
+  ipcMain.handle("fs:newFile", (_e, filePath: string) => {
+    try {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      if (!fs.existsSync(filePath)) fs.writeFileSync(filePath, "", "utf-8");
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  });
+  ipcMain.handle("fs:showInFolder", (_e, targetPath: string) => {
+    try {
+      shell.showItemInFolder(targetPath);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  });
+  ipcMain.handle("clipboard:write", (_e, text: string) => {
+    try {
+      clipboard.writeText(text);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
   });
 
   ipcMain.handle("git:status", (_e, root: string) => gitStatus(root));

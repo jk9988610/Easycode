@@ -151,6 +151,12 @@ export interface EasycodeApi {
   watchFile: (filePath: string) => Promise<void>;
   unwatchFile: (filePath: string) => Promise<void>;
   watchWorkspace: (root: string | null) => Promise<void>;
+  deletePath: (p: string) => Promise<{ ok: boolean; error?: string }>;
+  rename: (from: string, to: string) => Promise<{ ok: boolean; error?: string }>;
+  mkdir: (p: string) => Promise<{ ok: boolean; error?: string }>;
+  newFile: (p: string) => Promise<{ ok: boolean; error?: string }>;
+  showInFolder: (p: string) => Promise<{ ok: boolean; error?: string }>;
+  clipboardWrite: (text: string) => Promise<{ ok: boolean; error?: string }>;
   onFileChanged: (cb: (data: { path: string }) => void) => () => void;
   onFileDeleted: (cb: (data: { path: string }) => void) => () => void;
   onTreeChanged: (cb: (data: { path: string; root: string }) => void) => () => void;

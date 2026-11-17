@@ -10,12 +10,19 @@
 """
 import sys
 
+# Windows 下 stdout/stderr 默认 GBK,emoji 会炸;强制 UTF-8 + 替换无法编码的字符
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 from agent_loop import run_agent, run_interactive
 
 
 def main() -> None:
     if "--interactive" in sys.argv:
-        print("🟢 启动交互模式(stdin 发送 JSON 指令)", file=sys.stderr, flush=True)
+        print("[启动] 交互模式(stdin 发送 JSON 指令)", file=sys.stderr, flush=True)
         run_interactive()
         return
 
@@ -31,7 +38,7 @@ def main() -> None:
     if not task:
         print("错误:缺少任务描述", file=sys.stderr)
         sys.exit(1)
-    print(f"📝 任务: {task}", file=sys.stderr, flush=True)
+    print(f"[任务] {task}", file=sys.stderr, flush=True)
     run_agent(task)
 
 

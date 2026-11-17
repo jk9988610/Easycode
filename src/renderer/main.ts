@@ -32,6 +32,19 @@ import type {
   ShellKind,
 } from "./types";
 
+type MenuEntry =
+  | { sep: true }
+  | { header: string }
+  | {
+      label: string;
+      icon?: string;
+      shortcut?: string;
+      disabled?: boolean;
+      danger?: boolean;
+      submenu?: MenuEntry[];
+      run?: () => void | Promise<void>;
+    };
+
 class App {
   private root: HTMLElement;
   private settings!: AppSettings;
@@ -49,6 +62,10 @@ class App {
   private activeTabId: string | null = null;
   private expanded = new Set<string>();
   private treeCache = new Map<string, Awaited<ReturnType<typeof window.easycode.listDir>>>();
+  private contextMenuEl: HTMLElement | null = null;
+  private _ctxDocDown: ((e: MouseEvent) => void) | null = null;
+  private _ctxEsc: ((e: KeyboardEvent) => void) | null = null;
+  private selectedPath: string | null = null;
   private lspRunning = false;
   private lspServers: string[] = [];
   private cursorLabel = "Ln 1, Col 1";
@@ -1334,6 +1351,19 @@ class App {
       });
     });
     const treeRoot = el.querySelector(".tree-root") as HTMLElement;
+    treeRoot.setAttribute("tabindex", "0");
+    treeRoot.addEventListener("click", () => treeRoot.focus());
+    treeRoot.addEventListener("keydown", (e) => this.handleTreeKey(e));
+    treeRoot.addEventListener("contextmenu", (ev) => {
+      // 只在空白处（未命中 .tree-row）弹菜单；行上的菜单由行自己处理
+      if ((ev.target as HTMLElement).closest(".tree-row")) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      this.selectedPath = null;
+      this.selectRow(null);
+      const rootName = this.workspace.split(/[\\/]/).pop() || "工作区";
+      this.showMenu(ev.clientX, ev.clientY, this.treeMenuEntries(this.workspace, rootName, true, true));
+    });
     this.renderTreeNode(treeRoot, this.workspace, 0);
   }
 
@@ -1347,7 +1377,10 @@ class App {
       const fullPath = entry.path;
       const isDir = entry.isDirectory;
       const row = document.createElement("div");
-      row.className = "tree-row";
+      row.className = "tree-row" + (fullPath === this.selectedPath ? " selected" : "");
+      row.dataset.path = fullPath;
+      row.dataset.isDir = isDir ? "1" : "0";
+      row.dataset.name = entry.name;
       row.style.paddingLeft = `${8 + depth * 12}px`;
       const twist = document.createElement("span");
       twist.className = "twist";
@@ -1362,7 +1395,16 @@ class App {
       row.appendChild(twist);
       row.appendChild(label);
       container.appendChild(row);
+      row.addEventListener("contextmenu", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this.selectedPath = fullPath;
+        this.selectRow(fullPath);
+        this.showMenu(ev.clientX, ev.clientY, this.treeMenuEntries(fullPath, entry.name, isDir, false));
+      });
       label.addEventListener("click", async () => {
+        this.selectedPath = fullPath;
+        this.selectRow(fullPath);
         if (isDir) {
           if (this.expanded.has(fullPath)) this.expanded.delete(fullPath);
           else {
@@ -1375,9 +1417,518 @@ class App {
         }
       });
       if (isDir && this.expanded.has(fullPath)) {
-        this.renderTreeNode(container, fullPath, depth + 1);
+        const childCount = this.treeCache.get(fullPath)?.length ?? 0;
+        if (childCount === 0) {
+          const empty = document.createElement("div");
+          empty.className = "tree-empty";
+          empty.style.paddingLeft = `${8 + (depth + 1) * 12}px`;
+          empty.textContent = "（空文件夹）";
+          container.appendChild(empty);
+        } else {
+          this.renderTreeNode(container, fullPath, depth + 1);
+        }
       }
     }
+  }
+
+  private selectRow(path: string | null): void {
+    this.root.querySelectorAll<HTMLElement>(".tree-root .tree-row").forEach((r) => {
+      r.classList.toggle("selected", r.dataset.path === path);
+    });
+  }
+
+  private handleTreeKey(e: KeyboardEvent): void {
+    const rows = Array.from(
+      this.root.querySelectorAll<HTMLElement>(".tree-root .tree-row"),
+    );
+    if (!rows.length) return;
+    let idx = rows.findIndex((r) => r.dataset.path === this.selectedPath);
+    const hasSelection = idx >= 0;
+    if (!hasSelection) idx = 0;
+
+    const row = rows[idx];
+    const fullPath = row.dataset.path || "";
+    const isDir = row.dataset.isDir === "1";
+    const name = row.dataset.name || "";
+    const parentDir = isDir ? fullPath : this.parentDir(fullPath);
+
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        if (hasSelection) idx = Math.min(rows.length - 1, idx + 1);
+        this.selectedPath = rows[idx].dataset.path || null;
+        this.selectRow(this.selectedPath);
+        rows[idx].scrollIntoView({ block: "nearest" });
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        if (hasSelection) idx = Math.max(0, idx - 1);
+        this.selectedPath = rows[idx].dataset.path || null;
+        this.selectRow(this.selectedPath);
+        rows[idx].scrollIntoView({ block: "nearest" });
+        break;
+      case "ArrowRight":
+        e.preventDefault();
+        if (isDir && !this.expanded.has(fullPath)) {
+          this.expanded.add(fullPath);
+          void this.ensureTree(fullPath).then(() => this.renderSidebarBody());
+        }
+        break;
+      case "ArrowLeft":
+        e.preventDefault();
+        if (isDir && this.expanded.has(fullPath)) {
+          this.expanded.delete(fullPath);
+          this.renderSidebarBody();
+        }
+        break;
+      case "Enter":
+        e.preventDefault();
+        if (isDir) {
+          if (this.expanded.has(fullPath)) this.expanded.delete(fullPath);
+          else {
+            this.expanded.add(fullPath);
+            void this.ensureTree(fullPath).then(() => this.renderSidebarBody());
+          }
+        } else {
+          void this.openFile(fullPath);
+        }
+        break;
+      case "F2":
+        e.preventDefault();
+        void this.renameNode(fullPath, name, parentDir);
+        break;
+      case "Delete":
+        e.preventDefault();
+        void this.deleteNode(fullPath, name, parentDir);
+        break;
+    }
+  }
+
+  private async deleteNode(
+    fullPath: string,
+    name: string,
+    parentDir: string,
+  ): Promise<void> {
+    if (!confirm(`确定删除 "${name}"? 该操作不可撤销。`)) return;
+    try {
+      const r = await window.easycode.deletePath(fullPath);
+      if (!r.ok) throw new Error(r.error || "删除失败");
+      await this.invalidateTreeAround(parentDir);
+      if (this.selectedPath === fullPath) this.selectedPath = null;
+      this.renderSidebarBody();
+    } catch (err) {
+      this.showToast(`删除失败: ${String(err)}`);
+    }
+  }
+
+  private async renameNode(
+    fullPath: string,
+    name: string,
+    parentDir: string,
+  ): Promise<void> {
+    const nm = await this.promptInput("重命名", "新名称", name);
+    if (!nm || nm === name) return;
+    try {
+      const target = this.joinPath(parentDir, nm);
+      const r = await window.easycode.rename(fullPath, target);
+      if (!r.ok) throw new Error(r.error || "重命名失败");
+      await this.invalidateTreeAround(parentDir);
+      if (this.selectedPath === fullPath) this.selectedPath = target;
+      this.renderSidebarBody();
+    } catch (err) {
+      this.showToast(`重命名失败: ${String(err)}`);
+    }
+  }
+
+  private async reloadNode(fullPath: string): Promise<void> {
+    await this.invalidateTreeAround(fullPath);
+    this.renderSidebarBody();
+    this.showToast("已从磁盘重新加载");
+  }
+
+  private async refreshWorkspace(): Promise<void> {
+    if (!this.workspace) return;
+    this.treeCache.clear();
+    this.expanded.clear();
+    this.expanded.add(this.workspace);
+    await this.ensureTree(this.workspace);
+    this.renderSidebarBody();
+    this.showToast("工作区已刷新");
+  }
+
+  private closeContextMenu(): void {
+    if (this.contextMenuEl) {
+      if (this._ctxEsc) this.contextMenuEl.removeEventListener("keydown", this._ctxEsc);
+      this.contextMenuEl.remove();
+      this.contextMenuEl = null;
+    }
+    if (this._ctxDocDown) {
+      document.removeEventListener("mousedown", this._ctxDocDown);
+      this._ctxDocDown = null;
+    }
+    this._ctxEsc = null;
+  }
+
+  private showMenu(x: number, y: number, items: MenuEntry[]): void {
+    this.closeContextMenu();
+    const menu = document.createElement("div");
+    menu.className = "context-menu";
+    menu.style.position = "fixed";
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+    menu.style.zIndex = "10000";
+    menu.setAttribute("tabindex", "0");
+    menu.appendChild(this.buildMenuList(items));
+    document.body.appendChild(menu);
+    this.contextMenuEl = menu;
+
+    const rect = menu.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let left = x;
+    let top = y;
+    if (left + rect.width > vw - 4) left = Math.max(4, x - rect.width);
+    if (top + rect.height > vh - 4) top = Math.max(4, y - rect.height);
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+
+    const onDocDown = (e: MouseEvent) => {
+      if (!menu.contains(e.target as Node)) this.closeContextMenu();
+    };
+    this._ctxDocDown = onDocDown;
+    setTimeout(() => document.addEventListener("mousedown", onDocDown), 0);
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        this.closeContextMenu();
+      } else {
+        this.menuKeyNav(menu, e);
+      }
+    };
+    this._ctxEsc = onKey;
+    menu.addEventListener("keydown", onKey);
+    setTimeout(() => menu.focus(), 0);
+  }
+
+  private buildMenuList(items: MenuEntry[]): HTMLElement {
+    const list = document.createElement("div");
+    list.className = "context-menu-list";
+    for (const it of items) {
+      if ("sep" in it) {
+        const s = document.createElement("div");
+        s.className = "context-menu-sep";
+        list.appendChild(s);
+        continue;
+      }
+      if ("header" in it) {
+        const h = document.createElement("div");
+        h.className = "context-menu-header";
+        h.textContent = it.header;
+        list.appendChild(h);
+        continue;
+      }
+      const item = document.createElement("div");
+      item.className = "context-menu-item";
+      if (it.disabled) item.classList.add("disabled");
+      if (it.danger) item.classList.add("danger");
+      if (it.submenu?.length) item.classList.add("has-submenu");
+      item.setAttribute("tabindex", "-1");
+      const icon = document.createElement("span");
+      icon.className = "context-menu-icon";
+      icon.innerHTML = it.icon || "";
+      item.appendChild(icon);
+      const label = document.createElement("span");
+      label.className = "context-menu-label";
+      label.textContent = it.label;
+      item.appendChild(label);
+      if (it.shortcut) {
+        const sc = document.createElement("span");
+        sc.className = "context-menu-shortcut";
+        sc.textContent = it.shortcut;
+        item.appendChild(sc);
+      }
+      if (it.submenu?.length) {
+        const arrow = document.createElement("span");
+        arrow.className = "context-menu-arrow";
+        arrow.textContent = "\u25B8";
+        item.appendChild(arrow);
+        const sub = this.buildMenuList(it.submenu);
+        sub.classList.add("context-menu-submenu");
+        sub.style.display = "none";
+        item.appendChild(sub);
+        item.addEventListener("mouseenter", () => {
+          sub.style.display = "block";
+          sub.style.left = "100%";
+          sub.style.right = "auto";
+          sub.style.top = "0";
+          const r = sub.getBoundingClientRect();
+          if (r.right > window.innerWidth - 4) {
+            sub.style.left = "auto";
+            sub.style.right = "100%";
+          }
+          if (r.bottom > window.innerHeight - 4) {
+            sub.style.top = `${Math.max(0, window.innerHeight - 4 - r.height)}px`;
+          }
+        });
+        item.addEventListener("mouseleave", () => {
+          sub.style.display = "none";
+        });
+      } else if (it.run) {
+        item.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          this.closeContextMenu();
+          try {
+            await it.run!();
+          } catch (err) {
+            this.showToast(`操作失败: ${String(err)}`);
+          }
+        });
+      }
+      list.appendChild(item);
+    }
+    return list;
+  }
+
+  private menuKeyNav(menu: HTMLElement, e: KeyboardEvent): void {
+    const list = menu.querySelector<HTMLElement>(":scope > .context-menu-list");
+    if (!list) return;
+    const items = Array.from(list.children).filter(
+      (el): el is HTMLElement =>
+        el.classList.contains("context-menu-item") && !el.classList.contains("disabled"),
+    );
+    if (!items.length) return;
+    let idx = items.findIndex((el) => el === document.activeElement);
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      idx = idx < 0 ? 0 : (idx + 1) % items.length;
+      items[idx].focus();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      idx = idx < 0 ? items.length - 1 : (idx - 1 + items.length) % items.length;
+      items[idx].focus();
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      items[idx]?.click();
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      const sub = items[idx]?.querySelector<HTMLElement>(":scope > .context-menu-submenu");
+      if (sub) {
+        sub.style.display = "block";
+        sub.querySelector<HTMLElement>(".context-menu-item:not(.disabled)")?.focus();
+      }
+    }
+  }
+
+  private treeMenuEntries(
+    fullPath: string,
+    name: string,
+    isDir: boolean,
+    isBlank: boolean,
+  ): MenuEntry[] {
+    const parentDir = isDir ? fullPath : this.parentDir(fullPath);
+    const iconFile =
+      '<svg viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" opacity=".85" d="M3.5 1.5h5L12.5 5.5v9h-9z"/></svg>';
+    const iconDir =
+      '<svg viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" opacity=".85" d="M1.5 3h4.5l1.2 1.3H14.5v8.2h-13z"/></svg>';
+    const iconCopy =
+      '<svg viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" opacity=".85" d="M4 2h7v9H4z M2 4h1.5v8.5H10V14H2z"/></svg>';
+    const iconRefresh =
+      '<svg viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" opacity=".85" d="M8 2.5a5.5 5.5 0 1 0 5.2 7.3h-1.6A4 4 0 1 1 8 4v2l3-2.7L8 0.6z"/></svg>';
+    const iconRename =
+      '<svg viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" opacity=".85" d="M2 12.8l8.4-8.4 1.6 1.6L3.6 14.4 1.4 14.6zM11 3.4l1.6-1.6 1.6 1.6L12.6 5z"/></svg>';
+    const iconTrash =
+      '<svg viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" opacity=".85" d="M5 1h6v2H5zM2.5 3h11v1.5H2.5zM4 5h8l-.8 9H4.8z"/></svg>';
+    const iconExternal =
+      '<svg viewBox="0 0 16 16" width="14" height="14"><path fill="currentColor" opacity=".85" d="M9 1h6v6h-1.6V3.7L6.7 10.4 5.6 9.3l6.7-6.7H9zM2 4h5v1.6H3.6v7.8h7.8V10H13v4H2z"/></svg>';
+
+    const entries: MenuEntry[] = [];
+    entries.push({
+      label: "New",
+      icon: iconFile,
+      submenu: [
+        {
+          label: "File",
+          icon: iconFile,
+          run: () => this.createFileIn(parentDir, isDir ? fullPath : undefined),
+        },
+        {
+          label: "Directory",
+          icon: iconDir,
+          run: () => this.createDirIn(parentDir),
+        },
+      ],
+    });
+    entries.push({ sep: true });
+
+    if (!isBlank) {
+      entries.push({
+        label: "Copy Path/Reference\u2026",
+        icon: iconCopy,
+        submenu: [
+          {
+            label: "Absolute Path",
+            shortcut: "Ctrl+Shift+C",
+            run: async () => {
+              await window.easycode.clipboardWrite(fullPath);
+              this.showToast("绝对路径已复制");
+            },
+          },
+          {
+            label: "File Name",
+            run: async () => {
+              await window.easycode.clipboardWrite(name);
+              this.showToast("文件名已复制");
+            },
+          },
+          {
+            label: "Path From Content Root",
+            run: async () => {
+              await window.easycode.clipboardWrite(this.relPathFromAbs(fullPath));
+              this.showToast("相对路径已复制");
+            },
+          },
+        ],
+      });
+      entries.push({ sep: true });
+      entries.push({
+        label: "Rename\u2026",
+        icon: iconRename,
+        shortcut: "F2",
+        run: () => this.renameNode(fullPath, name, parentDir),
+      });
+      entries.push({
+        label: "Delete\u2026",
+        icon: iconTrash,
+        shortcut: "Delete",
+        danger: true,
+        run: () => this.deleteNode(fullPath, name, parentDir),
+      });
+      entries.push({ sep: true });
+      entries.push({
+        label: "Reload from Disk",
+        icon: iconRefresh,
+        run: () => this.reloadNode(fullPath),
+      });
+    } else {
+      entries.push({
+        label: "Refresh",
+        icon: iconRefresh,
+        shortcut: "Ctrl+R",
+        run: () => this.refreshWorkspace(),
+      });
+    }
+    entries.push({ sep: true });
+    entries.push({
+      label: "Open In",
+      icon: iconExternal,
+      submenu: [
+        {
+          label: "Explorer",
+          icon: iconExternal,
+          run: async () => {
+            await window.easycode.showInFolder(fullPath);
+          },
+        },
+      ],
+    });
+    return entries;
+  }
+
+  private async createFileIn(parentDir: string, expand?: string): Promise<void> {
+    const nm = await this.promptInput("新建文件", "输入文件名");
+    if (!nm) return;
+    const target = this.joinPath(parentDir, nm);
+    const r = await window.easycode.newFile(target);
+    if (!r.ok) throw new Error(r.error || "创建失败");
+    await this.invalidateTreeAround(parentDir);
+    if (expand) this.expanded.add(expand);
+    await this.openFile(target);
+    this.renderSidebarBody();
+  }
+
+  private async createDirIn(parentDir: string): Promise<void> {
+    const nm = await this.promptInput("新建文件夹", "输入文件夹名");
+    if (!nm) return;
+    const target = this.joinPath(parentDir, nm);
+    const r = await window.easycode.mkdir(target);
+    if (!r.ok) throw new Error(r.error || "创建失败");
+    await this.invalidateTreeAround(parentDir);
+    this.renderSidebarBody();
+  }
+
+  private joinPath(dir: string, name: string): string {
+    const sep = dir.includes("\\") ? "\\" : "/";
+    return dir.endsWith(sep) ? dir + name : dir + sep + name;
+  }
+
+  private promptInput(
+    title: string,
+    placeholder: string,
+    defaultValue = "",
+  ): Promise<string | null> {
+    return new Promise((resolve) => {
+      const overlay = document.createElement("div");
+      overlay.style.cssText =
+        "position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:10001;display:flex;align-items:center;justify-content:center;";
+
+      const box = document.createElement("div");
+      box.style.cssText =
+        "background:#0a0a0a;border:1px solid #1c1c1c;border-radius:6px;padding:16px;min-width:340px;box-shadow:0 8px 24px rgba(0,0,0,0.6);";
+
+      const h = document.createElement("div");
+      h.textContent = title;
+      h.style.cssText = "color:#e6edf3;font-size:13px;margin-bottom:10px;";
+      box.appendChild(h);
+
+      const input = document.createElement("input");
+      input.type = "text";
+      input.placeholder = placeholder;
+      input.value = defaultValue;
+      input.style.cssText =
+        "width:100%;padding:6px 8px;background:#161616;color:#e6edf3;border:1px solid #2a2a2a;border-radius:4px;outline:none;font-size:13px;box-sizing:border-box;";
+      box.appendChild(input);
+
+      const row = document.createElement("div");
+      row.style.cssText =
+        "display:flex;justify-content:flex-end;gap:8px;margin-top:12px;";
+
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.textContent = "取消";
+      cancel.style.cssText =
+        "padding:4px 12px;background:#1a1a1a;color:#b1bac4;border:1px solid #2a2a2a;border-radius:4px;cursor:pointer;font-size:13px;";
+
+      const ok = document.createElement("button");
+      ok.type = "button";
+      ok.textContent = "确定";
+      ok.style.cssText =
+        "padding:4px 12px;background:#238636;color:#fff;border:1px solid #2ea043;border-radius:4px;cursor:pointer;font-size:13px;";
+
+      row.appendChild(cancel);
+      row.appendChild(ok);
+      box.appendChild(row);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+
+      const finish = (v: string | null) => {
+        overlay.remove();
+        resolve(v);
+      };
+      ok.addEventListener("click", () => finish(input.value.trim() || null));
+      cancel.addEventListener("click", () => finish(null));
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") finish(input.value.trim() || null);
+        else if (e.key === "Escape") finish(null);
+      });
+      overlay.addEventListener("click", (e) => {
+        if (e.target === overlay) finish(null);
+      });
+      setTimeout(() => {
+        input.focus();
+        input.select();
+      }, 0);
+    });
   }
 
   private openSettingsModal(category?: string): void {

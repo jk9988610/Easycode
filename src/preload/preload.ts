@@ -33,6 +33,23 @@ const api = {
   unwatchFile: (filePath: string) => ipcRenderer.invoke("fs:unwatch", filePath),
   watchWorkspace: (root: string | null) =>
     ipcRenderer.invoke("fs:watchWorkspace", root || ""),
+  searchWorkspace: (
+    root: string,
+    opts: { query: string; mode: "name" | "content"; caseSensitive?: boolean; maxResults?: number },
+  ): Promise<{ path: string; name: string; line?: number; column?: number; preview?: string }[]> =>
+    ipcRenderer.invoke("fs:search", root, opts),
+  deletePath: (p: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke("fs:deletePath", p),
+  rename: (from: string, to: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke("fs:rename", from, to),
+  mkdir: (p: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke("fs:mkdir", p),
+  newFile: (p: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke("fs:newFile", p),
+  showInFolder: (p: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke("fs:showInFolder", p),
+  clipboardWrite: (text: string): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke("clipboard:write", text),
   onFileChanged: (cb: (data: { path: string }) => void) => {
     const listener = (_: unknown, data: { path: string }) => cb(data);
     ipcRenderer.on("fs:changed", listener);
